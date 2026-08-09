@@ -19,6 +19,39 @@ use sysinfo::System;
 
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitMode {
+    Top10,
+    Top25,
+    All,
+}
+
+impl LimitMode {
+    fn next(self) -> Self {
+        match self {
+            LimitMode::Top10 => LimitMode::Top25,
+            LimitMode::Top25 => LimitMode::All,
+            LimitMode::All => LimitMode::Top10,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LimitMode::Top10 => "10",
+            LimitMode::Top25 => "25",
+            LimitMode::All => "All",
+        }
+    }
+
+    fn limit(self) -> Option<usize> {
+        match self {
+            LimitMode::Top10 => Some(10),
+            LimitMode::Top25 => Some(25),
+            LimitMode::All => None,
+        }
+    }
+}
+
 pub fn run_status_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -30,6 +63,7 @@ pub fn run_status_tui() -> Result<()> {
 
     let mut is_paused = false;
     let mut paused_at: Option<DateTime<Local>> = None;
+    let mut limit_mode = LimitMode::Top10;
 
     let mut list_state = ListState::default();
     list_state.select(Some(0));
@@ -53,12 +87,18 @@ pub fn run_status_tui() -> Result<()> {
         let power_info = &cached_power;
         let metrics = &cached_metrics;
 
+        // Slice app details based on active LimitMode
+        let visible_apps = match limit_mode.limit() {
+            Some(lim) => &metrics.app_details[..metrics.app_details.len().min(lim)],
+            None => &metrics.app_details,
+        };
+
         // Ensure selection stays within valid bounds
-        let app_count = metrics.app_details.len();
-        if app_count > 0 {
+        let visible_count = visible_apps.len();
+        if visible_count > 0 {
             if let Some(selected) = list_state.selected() {
-                if selected >= app_count {
-                    list_state.select(Some(app_count - 1));
+                if selected >= visible_count {
+                    list_state.select(Some(visible_count - 1));
                 }
             } else {
                 list_state.select(Some(0));
@@ -101,7 +141,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.1.7", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.1.9", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | "),
@@ -200,8 +240,7 @@ pub fn run_status_tui() -> Result<()> {
             let selected_idx = list_state.selected().unwrap_or(0);
 
             // Interactive Top Applications List (Left) with High-Contrast Text Styling
-            let app_items: Vec<ListItem> = metrics
-                .app_details
+            let app_items: Vec<ListItem> = visible_apps
                 .iter()
                 .enumerate()
                 .map(|(idx, app)| {
@@ -232,8 +271,12 @@ pub fn run_status_tui() -> Result<()> {
                 })
                 .collect();
 
-            let selected_idx = list_state.selected().unwrap_or(0);
-            let list_title = format!(" 📊 Applications (#{}/{} | ↑/↓ to scroll) ", selected_idx + 1, app_count);
+            let list_title = format!(
+                " 📊 Applications (#{}/{} | Limit: {} [t] | ↑/↓ scroll) ",
+                selected_idx + 1,
+                visible_count,
+                limit_mode.label()
+            );
 
             let apps_list = List::new(app_items)
                 .block(Block::default().title(list_title).borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
@@ -247,7 +290,7 @@ pub fn run_status_tui() -> Result<()> {
             f.render_stateful_widget(apps_list, bottom_chunks[0], &mut list_state);
 
             // App Inspector Card (Right)
-            let inspector_lines = if let Some(selected_app) = metrics.app_details.get(selected_idx) {
+            let inspector_lines = if let Some(selected_app) = visible_apps.get(selected_idx) {
                 vec![
                     Line::from(vec![
                         Span::styled("App Name: ", Style::default().fg(Color::Gray)),
@@ -284,9 +327,9 @@ pub fn run_status_tui() -> Result<()> {
             let footer = Paragraph::new(Line::from(vec![
                 Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
                 Span::styled("↑/↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(" or ", Style::default().fg(Color::DarkGray)),
-                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(" navigate list | ", Style::default().fg(Color::DarkGray)),
+                Span::styled(" navigate | ", Style::default().fg(Color::DarkGray)),
+                Span::styled("t", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" limit ({}) | ", limit_mode.label()), Style::default().fg(Color::DarkGray)),
                 Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" {} | ", pause_action_str), Style::default().fg(Color::DarkGray)),
                 Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
@@ -312,15 +355,18 @@ pub fn run_status_tui() -> Result<()> {
                             paused_at = Some(Local::now());
                         }
                     }
+                    KeyCode::Char('t') | KeyCode::Char('T') => {
+                        limit_mode = limit_mode.next();
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        if app_count > 0 {
-                            let next = if current_sel + 1 >= app_count { 0 } else { current_sel + 1 };
+                        if visible_count > 0 {
+                            let next = if current_sel + 1 >= visible_count { 0 } else { current_sel + 1 };
                             list_state.select(Some(next));
                         }
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        if app_count > 0 {
-                            let prev = if current_sel == 0 { app_count - 1 } else { current_sel - 1 };
+                        if visible_count > 0 {
+                            let prev = if current_sel == 0 { visible_count - 1 } else { current_sel - 1 };
                             list_state.select(Some(prev));
                         }
                     }
