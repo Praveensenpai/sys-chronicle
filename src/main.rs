@@ -2,6 +2,7 @@ mod exporter;
 mod logger;
 mod monitor;
 mod service;
+mod tui;
 
 use anyhow::Result;
 use chrono::Local;
@@ -19,7 +20,7 @@ use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.1.3",
+    version = "0.1.4",
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
 struct Cli {
@@ -35,8 +36,12 @@ enum Commands {
         #[arg(short, long, default_value_t = 5)]
         interval: u64,
     },
-    /// Show current status of desktop focus, power supply, and resource load
-    Status,
+    /// Show interactive live Ratatui TUI dashboard of desktop focus, power supply, and resource load
+    Status {
+        /// Output plain text snapshot instead of launching Ratatui TUI
+        #[arg(short, long)]
+        plain: bool,
+    },
     /// View summary of recorded activity
     Summary {
         /// Specific date (YYYY-MM-DD), default is today
@@ -65,7 +70,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon { interval } => {
-            println!("[sys-chronicle daemon v0.1.0 starting]");
+            println!("[sys-chronicle daemon v0.1.4 starting]");
             println!("[+] Logging to: {:?}", LogWriter::get_logs_dir());
 
             let running = Arc::new(AtomicBool::new(true));
@@ -99,28 +104,32 @@ async fn main() -> Result<()> {
             let _ = tokio::join!(h_win, h_pow, h_met);
             println!("[+] Daemon stopped gracefully.");
         }
-        Commands::Status => {
-            println!("=== SysChronicle Status ===");
-            if let Some((cls, title)) = WindowMonitor::get_current_window() {
-                println!("Active Window: {} (\"{}\")", cls, title);
-            } else {
-                println!("Active Window: None / Idle");
-            }
+        Commands::Status { plain } => {
+            if plain {
+                println!("=== SysChronicle Status ===");
+                if let Some((cls, title)) = WindowMonitor::get_current_window() {
+                    println!("Active Window: {} (\"{}\")", cls, title);
+                } else {
+                    println!("Active Window: None / Idle");
+                }
 
-            if let Some(pow) = PowerMonitor::read_current_state() {
-                let ac_str = if pow.ac_online { "Plugged" } else { "Unplugged" };
-                println!("Battery: {}% ({}, {})", pow.capacity, pow.status, ac_str);
-            } else {
-                println!("Battery: Unknown / Desktop");
-            }
+                if let Some(pow) = PowerMonitor::read_current_state() {
+                    let ac_str = if pow.ac_online { "Plugged" } else { "Unplugged" };
+                    println!("Battery: {}% ({}, {})", pow.capacity, pow.status, ac_str);
+                } else {
+                    println!("Battery: Unknown / Desktop");
+                }
 
-            let mut sys = System::new_all();
-            let metrics = MetricsMonitor::sample_metrics(&mut sys);
-            println!(
-                "CPU Load: {:.1}% | RAM: {:.1}% ({} / {} MB)",
-                metrics.cpu_pct, metrics.ram_pct, metrics.ram_used_mb, metrics.ram_total_mb
-            );
-            println!("Top Applications: {}", metrics.top_apps.join(", "));
+                let mut sys = System::new_all();
+                let metrics = MetricsMonitor::sample_metrics(&mut sys);
+                println!(
+                    "CPU Load: {:.1}% | RAM: {:.1}% ({} / {} MB)",
+                    metrics.cpu_pct, metrics.ram_pct, metrics.ram_used_mb, metrics.ram_total_mb
+                );
+                println!("Top Applications: {}", metrics.top_apps.join(", "));
+            } else {
+                tui::run_status_tui()?;
+            }
         }
         Commands::Summary { date, days } => {
             let title_date = date
