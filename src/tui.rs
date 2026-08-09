@@ -101,7 +101,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.1.6", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.1.7", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | "),
@@ -197,57 +197,78 @@ pub fn run_status_tui() -> Result<()> {
                 .constraints([Constraint::Percentage(55), Constraint::Percentage(45)].as_ref())
                 .split(chunks[3]);
 
-            // Interactive Top Applications List (Left)
+            let selected_idx = list_state.selected().unwrap_or(0);
+
+            // Interactive Top Applications List (Left) with High-Contrast Text Styling
             let app_items: Vec<ListItem> = metrics
                 .app_details
                 .iter()
                 .enumerate()
                 .map(|(idx, app)| {
+                    let is_sel = idx == selected_idx;
+                    let num_style = if is_sel {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+
+                    let name_style = if is_sel {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    };
+
+                    let mem_style = if is_sel {
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
+
                     ListItem::new(Line::from(vec![
-                        Span::styled(format!(" #{:<2} ", idx + 1), Style::default().fg(Color::DarkGray)),
-                        Span::styled(format!("{:<18}", app.name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                        Span::styled(format!("{:>6} MB", app.ram_mb), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!(" #{:<2} ", idx + 1), num_style),
+                        Span::styled(format!("{:<18}", app.name), name_style),
+                        Span::styled(format!("{:>6} MB", app.ram_mb), mem_style),
                     ]))
                 })
                 .collect();
 
             let apps_list = List::new(app_items)
                 .block(Block::default().title(" 📊 Top Applications (↑/↓ to select) ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
-                .highlight_style(Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD))
+                .highlight_style(
+                    Style::default()
+                        .bg(Color::Rgb(35, 45, 65))
+                        .add_modifier(Modifier::BOLD),
+                )
                 .highlight_symbol("▶ ");
 
             f.render_stateful_widget(apps_list, bottom_chunks[0], &mut list_state);
 
             // App Inspector Card (Right)
-            let inspector_lines = if let Some(selected_idx) = list_state.selected() {
-                if let Some(selected_app) = metrics.app_details.get(selected_idx) {
-                    vec![
-                        Line::from(vec![
-                            Span::styled("App Name: ", Style::default().fg(Color::Gray)),
-                            Span::styled(&selected_app.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                        ]),
-                        Line::from(vec![
-                            Span::styled("Path: ", Style::default().fg(Color::Gray)),
-                            Span::styled(&selected_app.exe_path, Style::default().fg(Color::DarkGray)),
-                        ]),
-                        Line::from(vec![
-                            Span::styled("Instances: ", Style::default().fg(Color::Gray)),
-                            Span::styled(format!("{} processes", selected_app.process_count), Style::default().fg(Color::Magenta)),
-                        ]),
-                        Line::from(vec![
-                            Span::styled("Physical RAM: ", Style::default().fg(Color::Gray)),
-                            Span::styled(format!("{} MB ({:.1}% of System RAM)", selected_app.ram_mb, selected_app.ram_pct), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                        ]),
-                        Line::from(vec![
-                            Span::styled("App CPU Load: ", Style::default().fg(Color::Gray)),
-                            Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan)),
-                        ]),
-                    ]
-                } else {
-                    vec![Line::from(Span::raw("No process selected"))]
-                }
+            let inspector_lines = if let Some(selected_app) = metrics.app_details.get(selected_idx) {
+                vec![
+                    Line::from(vec![
+                        Span::styled("App Name: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&selected_app.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Path: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&selected_app.exe_path, Style::default().fg(Color::DarkGray)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Instances: ", Style::default().fg(Color::Gray)),
+                        Span::styled(format!("{} processes", selected_app.process_count), Style::default().fg(Color::Magenta)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Physical RAM: ", Style::default().fg(Color::Gray)),
+                        Span::styled(format!("{} MB ({:.1}% of System RAM)", selected_app.ram_mb, selected_app.ram_pct), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("App CPU Load: ", Style::default().fg(Color::Gray)),
+                        Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan)),
+                    ]),
+                ]
             } else {
-                vec![Line::from(Span::raw("Use ↑ / ↓ arrow keys to select an app"))]
+                vec![Line::from(Span::raw("No process selected"))]
             };
 
             let inspector_widget = Paragraph::new(inspector_lines)
