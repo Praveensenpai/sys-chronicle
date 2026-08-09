@@ -17,6 +17,7 @@ use std::io::stdout;
 use std::time::Duration;
 use sysinfo::System;
 
+use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,50 @@ impl LimitMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortMetric {
+    Ram,
+    Cpu,
+}
+
+impl SortMetric {
+    fn next(self) -> Self {
+        match self {
+            SortMetric::Ram => SortMetric::Cpu,
+            SortMetric::Cpu => SortMetric::Ram,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SortMetric::Ram => "RAM",
+            SortMetric::Cpu => "CPU",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortOrder {
+    Descending,
+    Ascending,
+}
+
+impl SortOrder {
+    fn toggle(self) -> Self {
+        match self {
+            SortOrder::Descending => SortOrder::Ascending,
+            SortOrder::Ascending => SortOrder::Descending,
+        }
+    }
+
+    fn symbol(self) -> &'static str {
+        match self {
+            SortOrder::Descending => "↓",
+            SortOrder::Ascending => "↑",
+        }
+    }
+}
+
 pub fn run_status_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -64,6 +109,8 @@ pub fn run_status_tui() -> Result<()> {
     let mut is_paused = false;
     let mut paused_at: Option<DateTime<Local>> = None;
     let mut limit_mode = LimitMode::Top10;
+    let mut sort_metric = SortMetric::Ram;
+    let mut sort_order = SortOrder::Descending;
 
     let mut list_state = ListState::default();
     list_state.select(Some(0));
@@ -87,10 +134,27 @@ pub fn run_status_tui() -> Result<()> {
         let power_info = &cached_power;
         let metrics = &cached_metrics;
 
+        // Apply sorting to app details
+        let mut sorted_apps: Vec<AppDetail> = metrics.app_details.clone();
+        match (sort_metric, sort_order) {
+            (SortMetric::Ram, SortOrder::Descending) => {
+                sorted_apps.sort_by_key(|a| std::cmp::Reverse(a.ram_mb));
+            }
+            (SortMetric::Ram, SortOrder::Ascending) => {
+                sorted_apps.sort_by_key(|a| a.ram_mb);
+            }
+            (SortMetric::Cpu, SortOrder::Descending) => {
+                sorted_apps.sort_by(|a, b| b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+            }
+            (SortMetric::Cpu, SortOrder::Ascending) => {
+                sorted_apps.sort_by(|a, b| a.cpu_pct.partial_cmp(&b.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+            }
+        }
+
         // Slice app details based on active LimitMode
         let visible_apps = match limit_mode.limit() {
-            Some(lim) => &metrics.app_details[..metrics.app_details.len().min(lim)],
-            None => &metrics.app_details,
+            Some(lim) => &sorted_apps[..sorted_apps.len().min(lim)],
+            None => &sorted_apps,
         };
 
         // Ensure selection stays within valid bounds
@@ -141,7 +205,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.1.9", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.2.0", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | "),
@@ -234,12 +298,12 @@ pub fn run_status_tui() -> Result<()> {
             // Bottom Row Split: Interactive Top Apps (Left) & Inspector Card (Right)
             let bottom_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)].as_ref())
+                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
                 .split(chunks[3]);
 
             let selected_idx = list_state.selected().unwrap_or(0);
 
-            // Interactive Top Applications List (Left) with High-Contrast Text Styling
+            // Interactive Top Applications List (Left) displaying RAM and CPU with high contrast
             let app_items: Vec<ListItem> = visible_apps
                 .iter()
                 .enumerate()
@@ -263,18 +327,28 @@ pub fn run_status_tui() -> Result<()> {
                         Style::default().fg(Color::Cyan)
                     };
 
+                    let cpu_style = if is_sel {
+                        Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Yellow)
+                    };
+
                     ListItem::new(Line::from(vec![
                         Span::styled(format!(" #{:<2} ", idx + 1), num_style),
-                        Span::styled(format!("{:<18}", app.name), name_style),
-                        Span::styled(format!("{:>6} MB", app.ram_mb), mem_style),
+                        Span::styled(format!("{:<15}", app.name), name_style),
+                        Span::styled(format!("{:>5} MB", app.ram_mb), mem_style),
+                        Span::raw(" | "),
+                        Span::styled(format!("{:>5.1}% CPU", app.cpu_pct), cpu_style),
                     ]))
                 })
                 .collect();
 
             let list_title = format!(
-                " 📊 Applications (#{}/{} | Limit: {} [t] | ↑/↓ scroll) ",
+                " 📊 Applications (#{}/{} | Sort: {} {} [s/o] | Limit: {} [t]) ",
                 selected_idx + 1,
                 visible_count,
+                sort_metric.label(),
+                sort_order.symbol(),
                 limit_mode.label()
             );
 
@@ -310,7 +384,7 @@ pub fn run_status_tui() -> Result<()> {
                     ]),
                     Line::from(vec![
                         Span::styled("App CPU Load: ", Style::default().fg(Color::Gray)),
-                        Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan)),
+                        Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     ]),
                 ]
             } else {
@@ -327,7 +401,11 @@ pub fn run_status_tui() -> Result<()> {
             let footer = Paragraph::new(Line::from(vec![
                 Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
                 Span::styled("↑/↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(" navigate | ", Style::default().fg(Color::DarkGray)),
+                Span::styled(" nav | ", Style::default().fg(Color::DarkGray)),
+                Span::styled("s", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" sort ({}) | ", sort_metric.label()), Style::default().fg(Color::DarkGray)),
+                Span::styled("o", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" order ({}) | ", sort_order.symbol()), Style::default().fg(Color::DarkGray)),
                 Span::styled("t", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" limit ({}) | ", limit_mode.label()), Style::default().fg(Color::DarkGray)),
                 Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -354,6 +432,12 @@ pub fn run_status_tui() -> Result<()> {
                             is_paused = true;
                             paused_at = Some(Local::now());
                         }
+                    }
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        sort_metric = sort_metric.next();
+                    }
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        sort_order = sort_order.toggle();
                     }
                     KeyCode::Char('t') | KeyCode::Char('T') => {
                         limit_mode = limit_mode.next();
