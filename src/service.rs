@@ -17,7 +17,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart={} daemon
+ExecStart={} daemon --interval 5
 Restart=on-failure
 RestartSec=5s
 

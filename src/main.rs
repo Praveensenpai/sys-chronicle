@@ -19,7 +19,7 @@ use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.1.1",
+    version = "0.1.2",
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
 struct Cli {
@@ -32,7 +32,7 @@ enum Commands {
     /// Run background daemon logging window activity, battery state, and system metrics
     Daemon {
         /// System metrics sample interval in seconds
-        #[arg(short, long, default_value_t = 30)]
+        #[arg(short, long, default_value_t = 5)]
         interval: u64,
     },
     /// Show current status of desktop focus, power supply, and resource load
