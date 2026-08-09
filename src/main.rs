@@ -19,7 +19,7 @@ use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.1.0",
+    version = "0.1.1",
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
 struct Cli {

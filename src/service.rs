@@ -37,8 +37,17 @@ WantedBy=default.target
 
     if reload.is_ok() {
         println!("[+] Executed systemctl --user daemon-reload");
-        println!("To enable and start the service automatically on boot, run:");
-        println!("  systemctl --user enable --now sys-chronicle.service");
+    }
+
+    let enable = Command::new("systemctl")
+        .arg("--user")
+        .arg("enable")
+        .arg("--now")
+        .arg("sys-chronicle.service")
+        .status();
+
+    if enable.is_ok() {
+        println!("✔ Systemd user service enabled & started (sys-chronicle.service)");
     }
 
     Ok(())

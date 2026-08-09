@@ -12,6 +12,8 @@ mkdir -p "$INSTALL_DIR"
 if [ -f "Cargo.toml" ]; then
     echo "[+] Local repository detected. Building release binary with Cargo..."
     cargo build --release
+    systemctl --user stop "$BINARY.service" 2>/dev/null || true
+    rm -f "$INSTALL_DIR/$BINARY"
     cp target/release/"$BINARY" "$INSTALL_DIR/$BINARY"
 else
     echo "[+] Downloading latest release binary from GitHub..."
@@ -26,6 +28,8 @@ else
     TMP_DIR=$(mktemp -d)
     curl -4 -fL --connect-timeout 10 --retry 3 -sS "$DOWNLOAD_URL" -o "$TMP_DIR/$BINARY.tar.gz"
     tar -xzf "$TMP_DIR/$BINARY.tar.gz" -C "$TMP_DIR"
+    systemctl --user stop "$BINARY.service" 2>/dev/null || true
+    rm -f "$INSTALL_DIR/$BINARY"
     mv "$TMP_DIR/$BINARY" "$INSTALL_DIR/$BINARY"
     rm -rf "$TMP_DIR"
 fi
@@ -33,5 +37,6 @@ fi
 chmod +x "$INSTALL_DIR/$BINARY"
 echo "✔ Installed $BINARY to $INSTALL_DIR/$BINARY"
 
+echo "[+] Configuring & enabling systemd user service..."
 "$INSTALL_DIR/$BINARY" install-service
-echo "✔ systemd user service configured. Run 'systemctl --user enable --now sys-chronicle.service' to start automatically."
+echo "✔ sys-chronicle.service active and running."
