@@ -1,22 +1,61 @@
 # sys-chronicle ⏱️
 
-**sys-chronicle** is a high-performance, lightweight Rust daemon and CLI tool that logs system activity—active desktop window/application focus timeline, battery charge/discharge events, and CPU/RAM load—into daily rolling JSON Lines files, formatted into AI-digestible Markdown reports.
+> **High-Performance System Activity Logger, Interactive TUI Explorer & AI Context Generator for Arch Linux & Wayland**
+
+[![Release](https://img.shields.io/github/v/release/Praveensenpai/sys-chronicle?color=blue&style=flat-square)](https://github.com/Praveensenpai/sys-chronicle/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.style=flat-square)](LICENSE)
+
+`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard that tracks active window focus, system power states, CPU/RAM utilization, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
 
 ---
 
-## Features
+## ❓ The Problem & Why You Need `sys-chronicle`
 
-- 🪟 **Real-time Window Focus Tracking**: Listens to Hyprland Unix socket IPC (`.socket2.sock`) for event-driven focus tracking without CPU polling. Fallback polling for generic Wayland/X11 sessions.
-- 🔋 **Power & Battery Monitoring**: Tracks battery levels, charging status (`Charging`, `Discharging`), AC adapter connections, and capacity changes.
-- ⚡ **Resource Usage Sampling**: Captures CPU utilization %, RAM used/total, and top resource-consuming applications.
-- 🤖 **AI-Optimized Markdown Exporter**: `sys-chronicle export` aggregates activity logs into compressed Markdown reports for feeding into LLMs (Claude, ChatGPT, Antigravity, Gemini).
-- ⚙️ **Systemd Integration**: `sys-chronicle install-service` automatically configures and starts a `systemd --user` unit.
+1. **"What did I actually spend time on today?"**
+   - Traditional system monitors (`htop`, `btop`) show instant CPU spikes, but leave no persistent record of your actual window focus history or screen time throughout the day.
+2. **AI Assistance Needs High-Fidelity Context**
+   - When asking AI agents (Antigravity, Claude, ChatGPT, Gemini) to analyze your daily productivity, debug a system crash, or write daily progress digests, you lack exact timestamped evidence of what applications were open and what system resources were consumed.
+3. **Heavy Trackers Drain Battery & RAM**
+   - Electron-based time trackers consume hundreds of megabytes of RAM and heavy CPU polling. `sys-chronicle` uses event-driven Unix socket IPC for **0-CPU overhead** window logging.
 
 ---
 
-## Installation
+## 💡 How `sys-chronicle` Solves It
 
-### One-liner Remote Install
+- 🪟 **Event-Driven Hyprland IPC Logging**: Listens directly to Hyprland Wayland Unix socket events (`.socket2.sock`) for event-driven focus tracking without CPU polling.
+- 📊 **Interactive TUI Dashboard**: Real-time process inspector, fuzzy search (`/`), metric sorting (`s`/`o`), process kill modal (`K`), and screen-time analytics tab (`Tab`).
+- 🤖 **1-Keypress AI Clipboard Export (`e`)**: Formats today's activity timeline into Markdown and pipes it straight into your Wayland clipboard (`wl-copy`).
+- ⚙️ **Automated Systemd Integration**: Managed as a background user daemon (`sys-chronicle.service`) using ~10 MB RAM.
+- 💾 **Lightweight JSONL Storage**: Saves rolling daily logs to `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl` (~3.6 MB/day).
+
+---
+
+## 🖥️ Interactive TUI Dashboard & Keyboard Shortcuts
+
+Launch the dashboard anytime with:
+```bash
+sys-chronicle status
+```
+
+### Keybindings & Controls
+
+| Shortcut | Action | Description |
+| :---: | :--- | :--- |
+| **`Tab`** | **Toggle View Tab** | Switch between **Live Dashboard** and **Daily Analytics** (accumulated screen time) |
+| **`/`** | **Fuzzy Search** | Filter running applications in real-time as you type |
+| **`K`** | **Kill Application** | Opens red confirmation modal to terminate selected app processes (`SIGTERM`) |
+| **`e`** | **Instant AI Export** | Formats today's activity into Markdown payload and copies to clipboard (`wl-copy`) |
+| **`s`** | **Toggle Sort Metric** | Switch application sorting between **`RAM`** and **`CPU`** load |
+| **`o`** | **Toggle Sort Order** | Toggle sorting order (**`Descending ↓`** ↔ **`Ascending ↑`**) |
+| **`t`** | **Toggle List Limit** | Cycle application limit count (**`10`** ➔ **`25`** ➔ **`All`**) |
+| **`p`** | **Pause / Resume** | Freeze live sampling with relative timestamp badge (`⏸️ PAUSED (X ago)`) |
+| **`q`** / **`Esc`** | **Exit TUI** | Return to terminal shell |
+
+---
+
+## 🚀 Installation
+
+### One-liner Quick Install
 ```bash
 curl -sSL https://raw.githubusercontent.com/Praveensenpai/sys-chronicle/main/install.sh | bash
 ```
@@ -31,10 +70,10 @@ cp target/release/sys-chronicle ~/.local/bin/
 
 ---
 
-## CLI Usage
+## ⚙️ CLI Usage
 
 ```bash
-# View instant status snapshot (Active app, battery %, CPU/RAM)
+# Launch interactive Ratatui TUI dashboard
 sys-chronicle status
 
 # Export activity report for today formatted for AI ingestion
@@ -46,10 +85,7 @@ sys-chronicle export | wl-copy
 # Export activity report for a specific date
 sys-chronicle export --date 2026-08-10
 
-# Export past N days
-sys-chronicle export --days 3
-
-# Run daemon in foreground (default interval 5s)
+# Run daemon in foreground (default 5s interval)
 sys-chronicle daemon --interval 5
 
 # Install & enable systemd user service
@@ -58,31 +94,25 @@ sys-chronicle install-service
 
 ---
 
-## Copying Context to AI Workflow
+## 🤖 Example Prompt for AI Analysis
 
-Run the following command to copy your formatted daily timeline directly to your clipboard:
-
+Run the export shortcut:
 ```bash
 sys-chronicle export | wl-copy
 ```
 
-Then paste into any AI model with a prompt like:
-> *"Analyze my system activity log from today (`sys-chronicle export`). Summarize my application usage timeline, highlight battery discharge periods, and identify resource load spikes."*
+Then paste into your favorite AI prompt:
+> *"Here is my sys-chronicle activity log from today. Please analyze my application usage timeline, calculate my active coding vs browsing ratio, and highlight any battery discharge or resource load spikes."*
 
 ---
 
-## Systemd User Service
+## 📁 Storage & Systemd Service
 
-The background service automatically starts upon installation:
-```bash
-systemctl --user status sys-chronicle.service
-```
-
-Logs are stored in:
-`~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl`
+- **Service Status**: `systemctl --user status sys-chronicle.service`
+- **Log Location**: `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl`
 
 ---
 
-## License
+## 📄 License
 
-MIT License
+[MIT License](LICENSE)
