@@ -14,8 +14,7 @@ use ratatui::{
     Terminal,
 };
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, stdout};
+use std::io::stdout;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use sysinfo::System;
@@ -143,37 +142,29 @@ struct ScreenTimeEntry {
 }
 
 fn compute_daily_screen_time() -> Vec<ScreenTimeEntry> {
-    let logs_dir = LogWriter::get_logs_dir();
-    let today_filename = Local::now().format("%Y-%m-%d.jsonl").to_string();
-    let log_file_path = logs_dir.join(today_filename);
-
-    if !log_file_path.exists() {
-        return Vec::new();
-    }
-
-    let file = match File::open(&log_file_path) {
-        Ok(f) => f,
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let events = match LogWriter::read_events_for_date(&today) {
+        Ok(evs) => evs,
         Err(_) => return Vec::new(),
     };
 
-    let reader = BufReader::new(file);
-    let mut window_events: Vec<(DateTime<Local>, String)> = Vec::new();
-
-    for line in reader.lines().flatten() {
-        if let Ok(event) = serde_json::from_str::<ActivityEvent>(&line) {
-            if let ActivityEvent::WindowFocus { timestamp, app_class, .. } = event {
-                if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp) {
-                    window_events.push((dt.with_timezone(&Local::now().timezone()), app_class));
-                }
-            }
-        }
-    }
-
-    if window_events.is_empty() {
+    if events.is_empty() {
         return Vec::new();
     }
 
     let mut duration_map: BTreeMap<String, i64> = BTreeMap::new();
+    let mut window_events: Vec<(DateTime<Local>, String)> = Vec::new();
+
+    for event in events {
+        if let ActivityEvent::WindowFocus { timestamp, app_class, duration_secs, .. } = event {
+            if let Some(dur) = duration_secs {
+                *duration_map.entry(app_class).or_insert(0) += dur as i64;
+            } else if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp) {
+                window_events.push((dt.with_timezone(&Local::now().timezone()), app_class));
+            }
+        }
+    }
+
     for window in window_events.windows(2) {
         let (dt1, app1) = &window[0];
         let (dt2, _) = &window[1];
@@ -339,7 +330,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.3.0", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.3.1", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | Tab: ["),
@@ -546,18 +537,22 @@ pub fn run_status_tui() -> Result<()> {
                     f.render_widget(inspector_widget, bottom_chunks[1]);
                 }
                 ActiveTab::Analytics => {
-                    let analytics_items: Vec<ListItem> = cached_analytics
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, entry)| {
-                            let formatted_time = format_screen_time(entry.total_seconds);
-                            ListItem::new(Line::from(vec![
-                                Span::styled(format!(" #{:<2} ", idx + 1), Style::default().fg(Color::DarkGray)),
-                                Span::styled(format!("{:<25}", entry.app_name), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                                Span::styled(formatted_time, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                            ]))
-                        })
-                        .collect();
+                    let analytics_items: Vec<ListItem> = if cached_analytics.is_empty() {
+                        vec![ListItem::new(Span::styled("  No screen time logged yet for today", Style::default().fg(Color::DarkGray)))]
+                    } else {
+                        cached_analytics
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, entry)| {
+                                let formatted_time = format_screen_time(entry.total_seconds);
+                                ListItem::new(Line::from(vec![
+                                    Span::styled(format!(" #{:<2} ", idx + 1), Style::default().fg(Color::DarkGray)),
+                                    Span::styled(format!("{:<25}", entry.app_name), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                                    Span::styled(formatted_time, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                                ]))
+                            })
+                            .collect()
+                    };
 
                     let analytics_list = List::new(analytics_items)
                         .block(Block::default().title(" 📈 Today's Accumulated Active Window Screen Time ").borders(Borders::ALL).border_style(Style::default().fg(Color::Magenta)));
@@ -685,7 +680,7 @@ pub fn run_status_tui() -> Result<()> {
                     }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
                         let title_date = Local::now().format("%Y-%m-%d").to_string();
-                        if let Ok(events) = LogWriter::read_recent_events(1) {
+                        if let Ok(events) = LogWriter::read_events_for_date(&title_date) {
                             let report = generate_ai_report(&events, &title_date);
                             if copy_to_clipboard(&report).is_ok() {
                                 toast_message = Some(("✔ AI payload copied to clipboard!".to_string(), Instant::now()));
