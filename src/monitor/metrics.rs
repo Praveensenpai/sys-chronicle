@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,17 +10,35 @@ use tokio::time::{sleep, Duration};
 
 use crate::logger::{ActivityEvent, LogWriter};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppDetail {
+    pub name: String,
+    pub exe_path: String,
+    pub process_count: usize,
+    pub ram_mb: u64,
+    pub ram_pct: f32,
+    pub cpu_pct: f32,
+}
+
 pub struct MetricsSnapshot {
     pub cpu_pct: f32,
     pub ram_used_mb: u64,
     pub ram_total_mb: u64,
     pub ram_pct: f32,
     pub top_apps: Vec<String>,
+    pub app_details: Vec<AppDetail>,
 }
 
 pub struct MetricsMonitor {
     writer: LogWriter,
     interval_secs: u64,
+}
+
+struct AppAcc {
+    exe_path: String,
+    process_count: usize,
+    ram_mb: u64,
+    cpu_pct: f32,
 }
 
 impl MetricsMonitor {
@@ -44,11 +63,15 @@ impl MetricsMonitor {
             0.0
         };
 
-        // Group process physical RSS memory by clean executable name
-        let mut app_memory: BTreeMap<String, u64> = BTreeMap::new();
+        // Group process physical RSS memory, CPU %, and process count by clean executable name
+        let mut app_map: BTreeMap<String, AppAcc> = BTreeMap::new();
         let mut seen_tgids = HashSet::new();
 
         for (pid, p) in sys.processes() {
+            if p.cmd().is_empty() {
+                continue;
+            }
+
             let pid_u32 = pid.as_u32();
 
             // Read PID, TGID, and VmRSS from /proc/[pid]/status
@@ -63,6 +86,8 @@ impl MetricsMonitor {
                     continue;
                 }
                 seen_tgids.insert(proc_tgid);
+
+                let raw_exe_path = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
 
                 let exe_name = if let Some(exe) = p.exe() {
                     if let Some(file_name) = exe.file_name() {
@@ -89,19 +114,51 @@ impl MetricsMonitor {
                 };
 
                 let mem_mb = rss_kb / 1024;
-                if mem_mb > 0 {
-                    *app_memory.entry(clean_name).or_insert(0) += mem_mb;
+                let proc_cpu = p.cpu_usage();
+
+                let entry = app_map.entry(clean_name).or_insert(AppAcc {
+                    exe_path: raw_exe_path.clone(),
+                    process_count: 0,
+                    ram_mb: 0,
+                    cpu_pct: 0.0,
+                });
+
+                entry.process_count += 1;
+                entry.ram_mb += mem_mb;
+                entry.cpu_pct += proc_cpu;
+                if entry.exe_path.is_empty() && !raw_exe_path.is_empty() {
+                    entry.exe_path = raw_exe_path;
                 }
             }
         }
 
-        let mut sorted_apps: Vec<(String, u64)> = app_memory.into_iter().collect();
-        sorted_apps.sort_by_key(|(_, mem)| std::cmp::Reverse(*mem));
+        let mut sorted_apps: Vec<(String, AppAcc)> = app_map.into_iter().collect();
+        sorted_apps.sort_by_key(|(_, acc)| std::cmp::Reverse(acc.ram_mb));
 
-        let top_apps: Vec<String> = sorted_apps
-            .into_iter()
+        let app_details: Vec<AppDetail> = sorted_apps
+            .iter()
+            .take(10)
+            .map(|(name, acc)| {
+                let app_ram_pct = if total_mem > 0 {
+                    (acc.ram_mb as f32 / total_mem as f32) * 100.0
+                } else {
+                    0.0
+                };
+                AppDetail {
+                    name: name.clone(),
+                    exe_path: if acc.exe_path.is_empty() { name.clone() } else { acc.exe_path.clone() },
+                    process_count: acc.process_count,
+                    ram_mb: acc.ram_mb,
+                    ram_pct: app_ram_pct,
+                    cpu_pct: acc.cpu_pct,
+                }
+            })
+            .collect();
+
+        let top_apps: Vec<String> = app_details
+            .iter()
             .take(4)
-            .map(|(name, mem)| format!("{} ({} MB)", name, mem))
+            .map(|app| format!("{} ({} MB)", app.name, app.ram_mb))
             .collect();
 
         MetricsSnapshot {
@@ -110,6 +167,7 @@ impl MetricsMonitor {
             ram_total_mb: total_mem,
             ram_pct,
             top_apps,
+            app_details,
         }
     }
 

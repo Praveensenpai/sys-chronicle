@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::io::stdout;
@@ -31,6 +31,9 @@ pub fn run_status_tui() -> Result<()> {
     let mut is_paused = false;
     let mut paused_at: Option<DateTime<Local>> = None;
 
+    let mut list_state = ListState::default();
+    list_state.select(Some(0));
+
     // Cached frozen snapshot for paused state
     let mut cached_window = WindowMonitor::get_current_window();
     let mut cached_power = PowerMonitor::read_current_state();
@@ -50,6 +53,18 @@ pub fn run_status_tui() -> Result<()> {
         let power_info = &cached_power;
         let metrics = &cached_metrics;
 
+        // Ensure selection stays within valid bounds
+        let app_count = metrics.app_details.len();
+        if app_count > 0 {
+            if let Some(selected) = list_state.selected() {
+                if selected >= app_count {
+                    list_state.select(Some(app_count - 1));
+                }
+            } else {
+                list_state.select(Some(0));
+            }
+        }
+
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -59,7 +74,7 @@ pub fn run_status_tui() -> Result<()> {
                         Constraint::Length(3), // Header
                         Constraint::Length(5), // Active Window & Battery
                         Constraint::Length(6), // CPU & RAM Gauges
-                        Constraint::Min(6),    // Top Applications & Info
+                        Constraint::Min(8),    // Interactive App List & Details
                         Constraint::Length(1), // Footer controls
                     ]
                     .as_ref(),
@@ -86,7 +101,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.1.5", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.1.6", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | "),
@@ -176,39 +191,84 @@ pub fn run_status_tui() -> Result<()> {
                 .ratio(ram_ratio as f64);
             f.render_widget(ram_gauge, gauge_chunks[1]);
 
-            // Bottom Row: Top Applications List
+            // Bottom Row Split: Interactive Top Apps (Left) & Inspector Card (Right)
+            let bottom_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)].as_ref())
+                .split(chunks[3]);
+
+            // Interactive Top Applications List (Left)
             let app_items: Vec<ListItem> = metrics
-                .top_apps
+                .app_details
                 .iter()
                 .enumerate()
                 .map(|(idx, app)| {
-                    let style = match idx {
-                        0 => Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
-                        1 => Style::default().fg(Color::LightYellow),
-                        2 => Style::default().fg(Color::LightCyan),
-                        _ => Style::default().fg(Color::White),
-                    };
                     ListItem::new(Line::from(vec![
-                        Span::styled(format!(" #{} ", idx + 1), Style::default().fg(Color::DarkGray)),
-                        Span::styled(app, style),
+                        Span::styled(format!(" #{:<2} ", idx + 1), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{:<18}", app.name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                        Span::styled(format!("{:>6} MB", app.ram_mb), Style::default().fg(Color::Cyan)),
                     ]))
                 })
                 .collect();
 
             let apps_list = List::new(app_items)
-                .block(Block::default().title(" 📊 Top Memory Consuming Applications ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
-            f.render_widget(apps_list, chunks[3]);
+                .block(Block::default().title(" 📊 Top Applications (↑/↓ to select) ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
+                .highlight_style(Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ");
 
-            // Footer
+            f.render_stateful_widget(apps_list, bottom_chunks[0], &mut list_state);
+
+            // App Inspector Card (Right)
+            let inspector_lines = if let Some(selected_idx) = list_state.selected() {
+                if let Some(selected_app) = metrics.app_details.get(selected_idx) {
+                    vec![
+                        Line::from(vec![
+                            Span::styled("App Name: ", Style::default().fg(Color::Gray)),
+                            Span::styled(&selected_app.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                        ]),
+                        Line::from(vec![
+                            Span::styled("Path: ", Style::default().fg(Color::Gray)),
+                            Span::styled(&selected_app.exe_path, Style::default().fg(Color::DarkGray)),
+                        ]),
+                        Line::from(vec![
+                            Span::styled("Instances: ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{} processes", selected_app.process_count), Style::default().fg(Color::Magenta)),
+                        ]),
+                        Line::from(vec![
+                            Span::styled("Physical RAM: ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{} MB ({:.1}% of System RAM)", selected_app.ram_mb, selected_app.ram_pct), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        ]),
+                        Line::from(vec![
+                            Span::styled("App CPU Load: ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan)),
+                        ]),
+                    ]
+                } else {
+                    vec![Line::from(Span::raw("No process selected"))]
+                }
+            } else {
+                vec![Line::from(Span::raw("Use ↑ / ↓ arrow keys to select an app"))]
+            };
+
+            let inspector_widget = Paragraph::new(inspector_lines)
+                .block(Block::default().title(" 🔍 Process Inspector ").borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)))
+                .wrap(Wrap { trim: true });
+            f.render_widget(inspector_widget, bottom_chunks[1]);
+
+            // Footer Controls
             let pause_action_str = if is_paused { "resume" } else { "pause" };
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled(" Press ", Style::default().fg(Color::DarkGray)),
+                Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("↑/↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(" or ", Style::default().fg(Color::DarkGray)),
+                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(" navigate list | ", Style::default().fg(Color::DarkGray)),
                 Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" to {} dashboard | ", pause_action_str), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!(" {} | ", pause_action_str), Style::default().fg(Color::DarkGray)),
                 Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::styled(" or ", Style::default().fg(Color::DarkGray)),
                 Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" to exit", Style::default().fg(Color::DarkGray)),
+                Span::styled(" exit", Style::default().fg(Color::DarkGray)),
             ]));
             f.render_widget(footer, chunks[4]);
         })?;
@@ -216,6 +276,7 @@ pub fn run_status_tui() -> Result<()> {
         // Poll for keypress with 1s timeout
         if event::poll(Duration::from_secs(1))? {
             if let Event::Key(key) = event::read()? {
+                let current_sel = list_state.selected().unwrap_or(0);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Char('p') | KeyCode::Char('P') => {
@@ -225,6 +286,18 @@ pub fn run_status_tui() -> Result<()> {
                         } else {
                             is_paused = true;
                             paused_at = Some(Local::now());
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if app_count > 0 {
+                            let next = if current_sel + 1 >= app_count { 0 } else { current_sel + 1 };
+                            list_state.select(Some(next));
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if app_count > 0 {
+                            let prev = if current_sel == 0 { app_count - 1 } else { current_sel - 1 };
+                            list_state.select(Some(prev));
                         }
                     }
                     _ => {}
