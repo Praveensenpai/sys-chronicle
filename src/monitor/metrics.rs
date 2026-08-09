@@ -136,8 +136,7 @@ impl MetricsMonitor {
         sorted_apps.sort_by_key(|(_, acc)| std::cmp::Reverse(acc.ram_mb));
 
         let app_details: Vec<AppDetail> = sorted_apps
-            .iter()
-            .take(10)
+            .into_iter()
             .map(|(name, acc)| {
                 let app_ram_pct = if total_mem > 0 {
                     (acc.ram_mb as f32 / total_mem as f32) * 100.0

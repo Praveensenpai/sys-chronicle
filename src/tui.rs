@@ -232,8 +232,11 @@ pub fn run_status_tui() -> Result<()> {
                 })
                 .collect();
 
+            let selected_idx = list_state.selected().unwrap_or(0);
+            let list_title = format!(" 📊 Applications (#{}/{} | ↑/↓ to scroll) ", selected_idx + 1, app_count);
+
             let apps_list = List::new(app_items)
-                .block(Block::default().title(" 📊 Top Applications (↑/↓ to select) ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
+                .block(Block::default().title(list_title).borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
                 .highlight_style(
                     Style::default()
                         .bg(Color::Rgb(35, 45, 65))
