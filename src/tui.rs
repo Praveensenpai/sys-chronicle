@@ -97,6 +97,15 @@ impl SortOrder {
     }
 }
 
+fn truncate_name(name: &str, max_len: usize) -> String {
+    if name.chars().count() > max_len {
+        let truncated: String = name.chars().take(max_len.saturating_sub(2)).collect();
+        format!("{}..", truncated)
+    } else {
+        name.to_string()
+    }
+}
+
 pub fn run_status_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -205,7 +214,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.2.0", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.2.1", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | "),
@@ -295,15 +304,15 @@ pub fn run_status_tui() -> Result<()> {
                 .ratio(ram_ratio as f64);
             f.render_widget(ram_gauge, gauge_chunks[1]);
 
-            // Bottom Row Split: Interactive Top Apps (Left) & Inspector Card (Right)
+            // Bottom Row Split: Interactive Top Apps (Left 55%) & Inspector Card (Right 45%)
             let bottom_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)].as_ref())
                 .split(chunks[3]);
 
             let selected_idx = list_state.selected().unwrap_or(0);
 
-            // Interactive Top Applications List (Left) displaying RAM and CPU with high contrast
+            // Interactive Top Applications List (Left) displaying truncated name, RAM, and CPU with fixed alignment
             let app_items: Vec<ListItem> = visible_apps
                 .iter()
                 .enumerate()
@@ -333,9 +342,11 @@ pub fn run_status_tui() -> Result<()> {
                         Style::default().fg(Color::Yellow)
                     };
 
+                    let clean_display_name = truncate_name(&app.name, 18);
+
                     ListItem::new(Line::from(vec![
                         Span::styled(format!(" #{:<2} ", idx + 1), num_style),
-                        Span::styled(format!("{:<15}", app.name), name_style),
+                        Span::styled(format!("{:<18}", clean_display_name), name_style),
                         Span::styled(format!("{:>5} MB", app.ram_mb), mem_style),
                         Span::raw(" | "),
                         Span::styled(format!("{:>5.1}% CPU", app.cpu_pct), cpu_style),
