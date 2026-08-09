@@ -1,0 +1,45 @@
+use anyhow::{Context, Result};
+use std::fs::{create_dir_all, write};
+use std::process::Command;
+
+pub fn install_user_service() -> Result<()> {
+    let home = dirs::home_dir().context("Could not find home directory")?;
+    let service_dir = home.join(".config").join("systemd").join("user");
+    create_dir_all(&service_dir)?;
+
+    let service_file = service_dir.join("sys-chronicle.service");
+    let exec_path = home.join(".local").join("bin").join("sys-chronicle");
+
+    let unit_content = format!(
+        r#"[Unit]
+Description=SysChronicle System Activity & Metrics Logger
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart={} daemon
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+"#,
+        exec_path.display()
+    );
+
+    write(&service_file, unit_content)?;
+    println!("[+] Created systemd user unit at {:?}", service_file);
+
+    let reload = Command::new("systemctl")
+        .arg("--user")
+        .arg("daemon-reload")
+        .status();
+
+    if reload.is_ok() {
+        println!("[+] Executed systemctl --user daemon-reload");
+        println!("To enable and start the service automatically on boot, run:");
+        println!("  systemctl --user enable --now sys-chronicle.service");
+    }
+
+    Ok(())
+}
