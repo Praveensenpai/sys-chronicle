@@ -20,7 +20,7 @@ use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.1.4",
+    version = "0.1.5",
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
 struct Cli {
@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon { interval } => {
-            println!("[sys-chronicle daemon v0.1.4 starting]");
+            println!("[sys-chronicle daemon v0.1.5 starting]");
             println!("[+] Logging to: {:?}", LogWriter::get_logs_dir());
 
             let running = Arc::new(AtomicBool::new(true));

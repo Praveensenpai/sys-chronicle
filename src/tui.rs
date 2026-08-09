@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Local};
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
@@ -27,11 +28,27 @@ pub fn run_status_tui() -> Result<()> {
 
     let mut sys = System::new_all();
 
+    let mut is_paused = false;
+    let mut paused_at: Option<DateTime<Local>> = None;
+
+    // Cached frozen snapshot for paused state
+    let mut cached_window = WindowMonitor::get_current_window();
+    let mut cached_power = PowerMonitor::read_current_state();
+    let mut cached_metrics = MetricsMonitor::sample_metrics(&mut sys);
+
     loop {
-        // Sample current data
-        let window_info = WindowMonitor::get_current_window();
-        let power_info = PowerMonitor::read_current_state();
-        let metrics = MetricsMonitor::sample_metrics(&mut sys);
+        let now = Local::now();
+
+        // Sample current data if not paused
+        if !is_paused {
+            cached_window = WindowMonitor::get_current_window();
+            cached_power = PowerMonitor::read_current_state();
+            cached_metrics = MetricsMonitor::sample_metrics(&mut sys);
+        }
+
+        let window_info = &cached_window;
+        let power_info = &cached_power;
+        let metrics = &cached_metrics;
 
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -49,12 +66,31 @@ pub fn run_status_tui() -> Result<()> {
                 )
                 .split(f.size());
 
-            // Header
+            // Header Status Badge
+            let status_span = if is_paused {
+                let elapsed_secs = match paused_at {
+                    Some(t) => (now - t).num_seconds().max(0),
+                    None => 0,
+                };
+                let relative_str = format_relative_time(elapsed_secs);
+                Span::styled(
+                    format!(" ⏸️ PAUSED ({}) ", relative_str),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(
+                    " 🟢 LIVE ",
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )
+            };
+
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.1.4", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.1.5", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
-                Span::styled("Live System Activity & Resource Dashboard", Style::default().fg(Color::Yellow)),
+                status_span,
+                Span::raw(" | "),
+                Span::styled("System Activity Dashboard", Style::default().fg(Color::Gray)),
             ]))
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
             f.render_widget(header, chunks[0]);
@@ -67,8 +103,8 @@ pub fn run_status_tui() -> Result<()> {
 
             // Active Window Widget
             let (app_cls, app_title) = match window_info {
-                Some((cls, title)) => (cls, title),
-                None => ("None".to_string(), "Idle / Unknown".to_string()),
+                Some((cls, title)) => (cls.as_str(), title.as_str()),
+                None => ("None", "Idle / Unknown"),
             };
 
             let win_text = vec![
@@ -81,8 +117,9 @@ pub fn run_status_tui() -> Result<()> {
                     Span::styled(app_title, Style::default().fg(Color::White)),
                 ]),
             ];
+            let win_border_color = if is_paused { Color::Yellow } else { Color::Blue };
             let win_widget = Paragraph::new(win_text)
-                .block(Block::default().title(" 🪟 Active Window ").borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)))
+                .block(Block::default().title(" 🪟 Active Window ").borders(Borders::ALL).border_style(Style::default().fg(win_border_color)))
                 .wrap(Wrap { trim: true });
             f.render_widget(win_widget, top_chunks[0]);
 
@@ -101,7 +138,7 @@ pub fn run_status_tui() -> Result<()> {
                         Span::styled("Capacity: ", Style::default().fg(Color::Gray)),
                         Span::styled(format!("{}%", pow.capacity), Style::default().fg(color).add_modifier(Modifier::BOLD)),
                         Span::raw(" ("),
-                        Span::styled(pow.status, Style::default().fg(Color::Cyan)),
+                        Span::styled(&pow.status, Style::default().fg(Color::Cyan)),
                         Span::raw(")"),
                     ]),
                     Line::from(vec![
@@ -163,12 +200,15 @@ pub fn run_status_tui() -> Result<()> {
             f.render_widget(apps_list, chunks[3]);
 
             // Footer
+            let pause_action_str = if is_paused { "resume" } else { "pause" };
             let footer = Paragraph::new(Line::from(vec![
                 Span::styled(" Press ", Style::default().fg(Color::DarkGray)),
+                Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" to {} dashboard | ", pause_action_str), Style::default().fg(Color::DarkGray)),
                 Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::styled(" or ", Style::default().fg(Color::DarkGray)),
                 Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" to exit TUI dashboard ", Style::default().fg(Color::DarkGray)),
+                Span::styled(" to exit", Style::default().fg(Color::DarkGray)),
             ]));
             f.render_widget(footer, chunks[4]);
         })?;
@@ -176,8 +216,18 @@ pub fn run_status_tui() -> Result<()> {
         // Poll for keypress with 1s timeout
         if event::poll(Duration::from_secs(1))? {
             if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                    break;
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        if is_paused {
+                            is_paused = false;
+                            paused_at = None;
+                        } else {
+                            is_paused = true;
+                            paused_at = Some(Local::now());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -188,4 +238,14 @@ pub fn run_status_tui() -> Result<()> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+fn format_relative_time(secs: i64) -> String {
+    if secs < 60 {
+        format!("{}s ago", secs)
+    } else {
+        let mins = secs / 60;
+        let s = secs % 60;
+        format!("{}m {}s ago", mins, s)
+    }
 }
