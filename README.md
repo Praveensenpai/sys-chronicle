@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/Praveensenpai/sys-chronicle?color=blue&style=flat-square)](https://github.com/Praveensenpai/sys-chronicle/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.style=flat-square)](LICENSE)
 
-`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard that tracks active window focus, system power states, CPU/RAM utilization, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
+`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard that tracks active window focus, system power states, CPU/RAM utilization, CPU temperature, fan speed, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
 
 ---
 
@@ -24,7 +24,7 @@
 
 - 🪟 **Reliable Hyprland Focus Logging**: Listens directly to Hyprland Wayland Unix socket events (`.socket2.sock`), reconciles the active window every five seconds, and finalizes the active session during a clean shutdown.
 - 🔎 **Focused vs. Running Context**: AI exports distinguish focused-window time from applications observed in periodic process samples, so long-running IDEs remain visible when focus events are noisy.
-- 📊 **Interactive TUI Dashboard**: Real-time process inspector, fuzzy search (`/`), metric sorting (`s`/`o`), process kill modal (`K`), and screen-time analytics tab (`Tab`).
+- 📊 **Interactive TUI Dashboard**: Real-time process inspector, CPU temperature/fan-speed sensor panel, fuzzy search (`/`), metric sorting (`s`/`o`), process kill modal (`K`), and screen-time analytics tab (`Tab`).
 - 🤖 **1-Keypress AI Clipboard Export (`e`)**: Formats today's activity timeline into Markdown and pipes it straight into your Wayland clipboard (`wl-copy`).
 - ⚙️ **Automated Systemd Integration**: Managed as a background user daemon (`sys-chronicle.service`) using ~10 MB RAM.
 - 💾 **Lightweight JSONL Storage**: Saves rolling daily logs to `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl` (~3.6 MB/day).

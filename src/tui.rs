@@ -278,7 +278,7 @@ pub fn run_status_tui() -> Result<()> {
                 .constraints(
                     [
                         Constraint::Length(3), // Header & Tabs
-                        Constraint::Length(5), // Active Window & Battery
+                        Constraint::Length(5), // Active Window, Power & Sensors
                         Constraint::Length(6), // CPU & RAM Gauges
                         Constraint::Min(8),    // Interactive App List or Analytics Tab
                         Constraint::Length(1), // Footer controls
@@ -330,7 +330,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.3.2", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.3.3", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | Tab: ["),
@@ -343,10 +343,10 @@ pub fn run_status_tui() -> Result<()> {
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
             f.render_widget(header, chunks[0]);
 
-            // Top Row: Active Window & Power
+            // Top Row: Active Window, Power & Sensors
             let top_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(25), Constraint::Percentage(25)].as_ref())
                 .split(chunks[1]);
 
             // Active Window Widget
@@ -400,6 +400,40 @@ pub fn run_status_tui() -> Result<()> {
             let bat_widget = Paragraph::new(battery_lines)
                 .block(Block::default().title(" 🔋 Power State ").borders(Borders::ALL).border_style(Style::default().fg(Color::Magenta)));
             f.render_widget(bat_widget, top_chunks[1]);
+
+            // Hardware sensor widget. Some systems do not expose hwmon data, so show a
+            // clear unavailable state instead of treating it as an error.
+            let temp_line = match metrics.cpu_temp_c {
+                Some(temp) => Line::from(vec![
+                    Span::styled("CPU Temp: ", Style::default().fg(Color::Gray)),
+                    Span::styled(format!("{temp:.1}°C"), Style::default().fg(if temp >= 90.0 { Color::Red } else if temp >= 75.0 { Color::Yellow } else { Color::Green }).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" ({})", metrics.cpu_temp_label.as_deref().unwrap_or("CPU sensor")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]),
+                None => Line::from(vec![
+                    Span::styled("CPU Temp: ", Style::default().fg(Color::Gray)),
+                    Span::styled("Unavailable", Style::default().fg(Color::DarkGray)),
+                ]),
+            };
+            let fan_line = match metrics.fan_rpm {
+                Some(rpm) => Line::from(vec![
+                    Span::styled("Fan Speed: ", Style::default().fg(Color::Gray)),
+                    Span::styled(format!("{rpm} RPM"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" ({})", metrics.fan_label.as_deref().unwrap_or("fan sensor")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]),
+                None => Line::from(vec![
+                    Span::styled("Fan Speed: ", Style::default().fg(Color::Gray)),
+                    Span::styled("Unavailable", Style::default().fg(Color::DarkGray)),
+                ]),
+            };
+            let sensors_widget = Paragraph::new(vec![temp_line, fan_line])
+                .block(Block::default().title(" 🌡️ Sensors ").borders(Borders::ALL).border_style(Style::default().fg(Color::LightRed)));
+            f.render_widget(sensors_widget, top_chunks[2]);
 
             // Middle Row: Gauges for CPU and RAM
             let gauge_chunks = Layout::default()
