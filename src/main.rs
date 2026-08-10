@@ -45,7 +45,7 @@ enum Commands {
     /// View summary of recorded activity
     Summary {
         /// Specific date (YYYY-MM-DD), default is today
-        #[arg(short, long)]
+        #[arg(short = 'D', long)]
         date: Option<String>,
         /// Number of recent days to include
         #[arg(short, long, default_value_t = 1)]
@@ -54,7 +54,7 @@ enum Commands {
     /// Export activity logs as a structured Markdown prompt for AI analysis
     Export {
         /// Specific date (YYYY-MM-DD), default is today
-        #[arg(short, long)]
+        #[arg(short = 'D', long)]
         date: Option<String>,
         /// Number of recent days to include
         #[arg(short, long, default_value_t = 1)]

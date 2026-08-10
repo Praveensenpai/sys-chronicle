@@ -13,6 +13,7 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
 
     // 1. Application Usage Statistics
     let mut app_totals: BTreeMap<String, u64> = BTreeMap::new();
+    let mut brief_focus_totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut timeline_blocks: Vec<String> = Vec::new();
 
     let mut current_app: Option<(String, String, String, u64)> = None; // (app_class, title, start_ts, duration)
@@ -28,6 +29,11 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
             let dur = duration_secs.unwrap_or(0);
             if dur > 0 && !app_class.is_empty() {
                 *app_totals.entry(app_class.clone()).or_insert(0) += dur;
+                if dur < 5 {
+                    let entry = brief_focus_totals.entry(app_class.clone()).or_insert((0, 0));
+                    entry.0 += dur;
+                    entry.1 += 1;
+                }
             }
 
             let short_time = extract_short_time(timestamp);
@@ -67,7 +73,24 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
         sorted_apps.sort_by_key(|(_, dur)| std::cmp::Reverse(*dur));
 
         for (app, total_secs) in sorted_apps {
-            report.push_str(&format!("- **{}**: {}\n", app, format_duration(total_secs)));
+            report.push_str(&format!("- **{}**: {}\n", display_app_name(&app), format_duration(total_secs)));
+        }
+        report.push_str("\n");
+    }
+
+    if !brief_focus_totals.is_empty() {
+        report.push_str("### Brief Focus Activity\n");
+        report.push_str("> Short focus intervals are retained here instead of being omitted from the main timeline.\n\n");
+        let mut brief_focus_totals: Vec<_> = brief_focus_totals.into_iter().collect();
+        brief_focus_totals.sort_by_key(|(_, (duration, _))| std::cmp::Reverse(*duration));
+        for (app, (duration, intervals)) in brief_focus_totals {
+            report.push_str(&format!(
+                "- **{}**: {} across {} interval{}\n",
+                display_app_name(&app),
+                format_duration(duration),
+                intervals,
+                if intervals == 1 { "" } else { "s" },
+            ));
         }
         report.push_str("\n");
     }
@@ -86,8 +109,52 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
         report.push_str("\n");
     }
 
-    // 2. Power & Battery Timeline
-    report.push_str("## 3. Power & Charging Events\n");
+    // Process presence is intentionally kept separate from focus time. A process can be
+    // doing useful work (for example, compiling in Android Studio) while another window
+    // owns keyboard focus.
+    let mut observed_apps: BTreeMap<String, AppObservation> = BTreeMap::new();
+    for event in events {
+        if let ActivityEvent::SystemMetrics { timestamp, top_apps, .. } = event {
+            for top_app in top_apps {
+                let name = top_app_name(top_app);
+                if name.is_empty() {
+                    continue;
+                }
+                let observation = observed_apps.entry(name).or_insert_with(|| AppObservation {
+                    first_timestamp: timestamp.clone(),
+                    last_timestamp: timestamp.clone(),
+                    samples: 0,
+                });
+                observation.last_timestamp = timestamp.clone();
+                observation.samples += 1;
+            }
+        }
+    }
+
+    report.push_str("## 3. Observed Running Applications\n");
+    report.push_str("> Derived from periodic process samples. This indicates that an application was running among the largest processes; it is not focused-screen time.\n\n");
+    let mut observed_apps: Vec<_> = observed_apps
+        .into_iter()
+        .filter(|(_, observation)| observation.samples >= 3)
+        .collect();
+    observed_apps.sort_by_key(|(_, observation)| std::cmp::Reverse(observation.samples));
+    if observed_apps.is_empty() {
+        report.push_str("No repeated process observations recorded.\n\n");
+    } else {
+        for (app, observation) in observed_apps.iter().take(12) {
+            report.push_str(&format!(
+                "- **{}**: observed in {} samples (`{}`–`{}`)\n",
+                display_app_name(app),
+                observation.samples,
+                extract_short_time(&observation.first_timestamp),
+                extract_short_time(&observation.last_timestamp),
+            ));
+        }
+        report.push_str("\n");
+    }
+
+    // 4. Power & Battery Timeline
+    report.push_str("## 4. Power & Charging Events\n");
     let mut power_events_count = 0;
 
     for event in events {
@@ -112,8 +179,8 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
     }
     report.push_str("\n");
 
-    // 3. System Load Metrics (CPU & Memory Spikes)
-    report.push_str("## 4. CPU & RAM Resource Utilization\n");
+    // 5. System Load Metrics (CPU & Memory Spikes)
+    report.push_str("## 5. CPU & RAM Resource Utilization\n");
 
     let mut cpu_samples = Vec::new();
     let mut ram_samples = Vec::new();
@@ -201,5 +268,27 @@ fn format_duration(secs: u64) -> String {
         format!("{}m {}s", mins, s)
     } else {
         format!("{}s", s)
+    }
+}
+
+struct AppObservation {
+    first_timestamp: String,
+    last_timestamp: String,
+    samples: u64,
+}
+
+fn top_app_name(top_app: &str) -> String {
+    top_app
+        .split_once(" (")
+        .map(|(name, _)| name)
+        .unwrap_or(top_app)
+        .trim()
+        .to_string()
+}
+
+fn display_app_name(app: &str) -> String {
+    match app {
+        "jetbrains-studio" | "studio" => format!("Android Studio ({})", app),
+        _ => app.to_string(),
     }
 }

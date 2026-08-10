@@ -81,14 +81,25 @@ impl WindowMonitor {
                                         }
                                     }
                                 }
-                                Ok(None) => break,
-                                Err(_) => break,
+                                Ok(None) | Err(_) => break,
                             }
                         }
-                        _ = sleep(Duration::from_millis(500)) => {}
+                        // The event stream is normally authoritative, but a periodic query
+                        // recovers a focus change when Hyprland drops an IPC event.
+                        _ = sleep(Duration::from_secs(5)) => {
+                            if let Some((cls, title)) = Self::get_current_window() {
+                                self.on_window_change(cls, title);
+                            }
+                        }
                     }
                 }
-                return Ok(());
+
+                if !running.load(Ordering::SeqCst) {
+                    self.finish_current_window();
+                    return Ok(());
+                }
+
+                eprintln!("[WindowMonitor] Hyprland IPC connection closed. Falling back to polling.");
             }
         }
 
@@ -107,12 +118,23 @@ impl WindowMonitor {
             sleep(Duration::from_secs(2)).await;
         }
 
+        self.finish_current_window();
+
         Ok(())
     }
 
     fn on_window_change(&mut self, new_class: String, new_title: String) {
+        // Hyprland can send the current active window immediately after a
+        // subscription connects. Do not turn that duplicate into a zero-second
+        // session or reset its start time.
+        if matches!(
+            self.last_window.as_ref(),
+            Some((old_class, old_title, _)) if old_class == &new_class && old_title == &new_title
+        ) {
+            return;
+        }
+
         let now = Local::now();
-        let timestamp_str = now.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string();
 
         if let Some((old_class, old_title, start_time)) = self.last_window.take() {
             let duration_secs = (now - start_time).num_seconds().max(0) as u64;
@@ -126,6 +148,7 @@ impl WindowMonitor {
             let _ = self.writer.write_event(&prev_event);
         }
 
+        let timestamp_str = now.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string();
         let new_event = ActivityEvent::WindowFocus {
             timestamp: timestamp_str,
             app_class: new_class.clone(),
@@ -135,6 +158,21 @@ impl WindowMonitor {
         let _ = self.writer.write_event(&new_event);
 
         self.last_window = Some((new_class, new_title, now));
+    }
+
+    fn finish_current_window(&mut self) {
+        let Some((app_class, title, start_time)) = self.last_window.take() else {
+            return;
+        };
+
+        let duration_secs = (Local::now() - start_time).num_seconds().max(0) as u64;
+        let event = ActivityEvent::WindowFocus {
+            timestamp: start_time.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string(),
+            app_class,
+            title,
+            duration_secs: Some(duration_secs),
+        };
+        let _ = self.writer.write_event(&event);
     }
 
     fn find_hyprland_socket() -> Option<PathBuf> {

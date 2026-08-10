@@ -22,7 +22,8 @@
 
 ## 💡 How `sys-chronicle` Solves It
 
-- 🪟 **Event-Driven Hyprland IPC Logging**: Listens directly to Hyprland Wayland Unix socket events (`.socket2.sock`) for event-driven focus tracking without CPU polling.
+- 🪟 **Reliable Hyprland Focus Logging**: Listens directly to Hyprland Wayland Unix socket events (`.socket2.sock`), reconciles the active window every five seconds, and finalizes the active session during a clean shutdown.
+- 🔎 **Focused vs. Running Context**: AI exports distinguish focused-window time from applications observed in periodic process samples, so long-running IDEs remain visible when focus events are noisy.
 - 📊 **Interactive TUI Dashboard**: Real-time process inspector, fuzzy search (`/`), metric sorting (`s`/`o`), process kill modal (`K`), and screen-time analytics tab (`Tab`).
 - 🤖 **1-Keypress AI Clipboard Export (`e`)**: Formats today's activity timeline into Markdown and pipes it straight into your Wayland clipboard (`wl-copy`).
 - ⚙️ **Automated Systemd Integration**: Managed as a background user daemon (`sys-chronicle.service`) using ~10 MB RAM.
