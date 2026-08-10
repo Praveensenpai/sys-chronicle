@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use chrono::Local;
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use sysinfo::System;
@@ -20,10 +20,14 @@ use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.3.3",
+    version = "0.3.4",
+    disable_version_flag = true,
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
 struct Cli {
+    /// Print version information
+    #[arg(short = 'v', long, visible_short_alias = 'V', action = ArgAction::Version)]
+    version: (),
     #[command(subcommand)]
     command: Commands,
 }
@@ -70,7 +74,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon { interval } => {
-            println!("[sys-chronicle daemon v0.3.3 starting]");
+            println!("[sys-chronicle daemon v0.3.4 starting]");
             println!("[+] Logging to: {:?}", LogWriter::get_logs_dir());
 
             let running = Arc::new(AtomicBool::new(true));

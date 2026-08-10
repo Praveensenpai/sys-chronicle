@@ -330,7 +330,7 @@ pub fn run_status_tui() -> Result<()> {
 
             let header = Paragraph::new(Line::from(vec![
                 Span::styled(" ⏱️  SysChronicle ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled("v0.3.3", Style::default().fg(Color::DarkGray)),
+                Span::styled("v0.3.4", Style::default().fg(Color::DarkGray)),
                 Span::raw(" | "),
                 status_span,
                 Span::raw(" | Tab: ["),
