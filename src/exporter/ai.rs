@@ -280,6 +280,47 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
         report.push_str("No system performance samples recorded.\n\n");
     }
 
+    // 6. Media Playback & Player Events
+    let mut media_events = Vec::new();
+    for event in events {
+        if let ActivityEvent::MediaPlayback {
+            timestamp,
+            player,
+            event_type,
+            title,
+            position_secs,
+            duration_secs,
+            ..
+        } = event
+        {
+            let time_str = extract_short_time(timestamp);
+            let pos_str = format_duration(*position_secs);
+            let dur_str = duration_secs.map(|d| format!(" / {}", format_duration(d))).unwrap_or_default();
+
+            let action_desc = match event_type.as_str() {
+                "start" => format!("Started watching *\"{}\"* at `{}`{}", title, pos_str, dur_str),
+                "pause" => format!("Paused *\"{}\"* at `{}`{}", title, pos_str, dur_str),
+                "resume" => format!("Resumed *\"{}\"* at `{}`{}", title, pos_str, dur_str),
+                "seek_forward" => format!("Fast-forwarded *\"{}\"* to `{}`{}", title, pos_str, dur_str),
+                "seek_backward" => format!("Rewound *\"{}\"* to `{}`{}", title, pos_str, dur_str),
+                "stop" => format!("Stopped *\"{}\"* at `{}`{}", title, pos_str, dur_str),
+                _ => format!("Event `{}` on *\"{}\"* at `{}`{}", event_type, title, pos_str, dur_str),
+            };
+
+            media_events.push(format!("- `[{}]` **{}**: {}", time_str, player, action_desc));
+        }
+    }
+
+    if !media_events.is_empty() {
+        report.push_str("## 6. Media Playback Chronicle\n");
+        report.push_str("> Real-time media control events (play, pause, resume, seek, stop) captured from MPV IPC.\n\n");
+        for event_str in media_events.iter().take(100) {
+            report.push_str(event_str);
+            report.push_str("\n");
+        }
+        report.push_str("\n");
+    }
+
     report
 }
 

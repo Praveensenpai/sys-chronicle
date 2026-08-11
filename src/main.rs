@@ -14,7 +14,7 @@ use tokio::signal;
 
 use exporter::generate_ai_report;
 use logger::LogWriter;
-use monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
+use monitor::{MetricsMonitor, MpvMonitor, PowerMonitor, WindowMonitor};
 
 #[derive(Parser)]
 #[command(
@@ -81,14 +81,17 @@ async fn main() -> Result<()> {
             let r_win = Arc::clone(&running);
             let r_pow = Arc::clone(&running);
             let r_met = Arc::clone(&running);
+            let r_mpv = Arc::clone(&running);
 
             let w_writer = LogWriter::new()?;
             let p_writer = LogWriter::new()?;
             let m_writer = LogWriter::new()?;
+            let mpv_writer = LogWriter::new()?;
 
             let mut window_mon = WindowMonitor::new(w_writer);
             let mut power_mon = PowerMonitor::new(p_writer);
             let mut metrics_mon = MetricsMonitor::new(m_writer, interval);
+            let mut mpv_mon = MpvMonitor::new(mpv_writer);
 
             let h_win = tokio::spawn(async move {
                 let _ = window_mon.run(r_win).await;
@@ -99,13 +102,16 @@ async fn main() -> Result<()> {
             let h_met = tokio::spawn(async move {
                 let _ = metrics_mon.run(r_met).await;
             });
+            let h_mpv = tokio::spawn(async move {
+                let _ = mpv_mon.run(r_mpv).await;
+            });
 
             println!("[+] Monitors initialized. Press Ctrl+C to stop.");
             signal::ctrl_c().await?;
             println!("\n[!] Shutdown signal received, terminating daemon...");
 
             running.store(false, Ordering::SeqCst);
-            let _ = tokio::join!(h_win, h_pow, h_met);
+            let _ = tokio::join!(h_win, h_pow, h_met, h_mpv);
             println!("[+] Daemon stopped gracefully.");
         }
         Commands::Status { plain } => {

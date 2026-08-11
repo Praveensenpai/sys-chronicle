@@ -24,6 +24,17 @@ pub enum ActivityEvent {
         ram_pct: f32,
         top_apps: Vec<String>,
     },
+    MediaPlayback {
+        timestamp: String,
+        player: String,
+        event_type: String,
+        title: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        position_secs: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        duration_secs: Option<u64>,
+    },
 }
 
 impl ActivityEvent {
@@ -32,6 +43,7 @@ impl ActivityEvent {
             ActivityEvent::WindowFocus { timestamp, .. } => timestamp,
             ActivityEvent::PowerState { timestamp, .. } => timestamp,
             ActivityEvent::SystemMetrics { timestamp, .. } => timestamp,
+            ActivityEvent::MediaPlayback { timestamp, .. } => timestamp,
         }
     }
 }
