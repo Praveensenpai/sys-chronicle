@@ -93,6 +93,10 @@ impl WindowMonitor {
                                             if !app_class.is_empty() || !title.is_empty() {
                                                 self.on_window_change(app_class, title);
                                             }
+                                        } else if msg.starts_with("windowtitle>>") {
+                                            if let Some((cls, title)) = Self::get_current_window() {
+                                                self.on_window_change(cls, title);
+                                            }
                                         }
                                     }
                                     Ok(None) | Err(_) => {
