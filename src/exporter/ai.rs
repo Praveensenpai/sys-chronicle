@@ -13,6 +13,7 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
 
     // 1. Application Usage Statistics
     let mut app_totals: BTreeMap<String, u64> = BTreeMap::new();
+    let mut app_titles: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
     let mut brief_focus_totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut timeline_blocks: Vec<String> = Vec::new();
 
@@ -29,6 +30,14 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
             let dur = duration_secs.unwrap_or(0);
             if dur > 0 && !app_class.is_empty() {
                 *app_totals.entry(app_class.clone()).or_insert(0) += dur;
+                let clean_t = clean_window_title(title, app_class);
+                if !clean_t.is_empty() {
+                    *app_titles
+                        .entry(app_class.clone())
+                        .or_default()
+                        .entry(clean_t)
+                        .or_insert(0) += dur;
+                }
                 if dur < 5 {
                     let entry = brief_focus_totals.entry(app_class.clone()).or_insert((0, 0));
                     entry.0 += dur;
@@ -43,10 +52,18 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
                     *curr_dur += dur;
                 } else {
                     if *curr_dur >= 5 {
-                        timeline_blocks.push(format!(
-                            "- `[{}]` **{}**: \"{}\" ({})",
-                            start_ts, curr_class, curr_title, format_duration(*curr_dur)
-                        ));
+                        let display_t = clean_window_title(curr_title, curr_class);
+                        if display_t.is_empty() {
+                            timeline_blocks.push(format!(
+                                "- `[{}]` **{}** ({})",
+                                start_ts, curr_class, format_duration(*curr_dur)
+                            ));
+                        } else {
+                            timeline_blocks.push(format!(
+                                "- `[{}]` **{}**: \"{}\" ({})",
+                                start_ts, curr_class, display_t, format_duration(*curr_dur)
+                            ));
+                        }
                     }
                     current_app = Some((app_class.clone(), title.clone(), short_time, dur));
                 }
@@ -58,10 +75,18 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
 
     if let Some((curr_class, curr_title, start_ts, curr_dur)) = current_app {
         if curr_dur >= 5 {
-            timeline_blocks.push(format!(
-                "- `[{}]` **{}**: \"{}\" ({})",
-                start_ts, curr_class, curr_title, format_duration(curr_dur)
-            ));
+            let display_t = clean_window_title(&curr_title, &curr_class);
+            if display_t.is_empty() {
+                timeline_blocks.push(format!(
+                    "- `[{}]` **{}** ({})",
+                    start_ts, curr_class, format_duration(curr_dur)
+                ));
+            } else {
+                timeline_blocks.push(format!(
+                    "- `[{}]` **{}**: \"{}\" ({})",
+                    start_ts, curr_class, display_t, format_duration(curr_dur)
+                ));
+            }
         }
     }
 
@@ -74,6 +99,17 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
 
         for (app, total_secs) in sorted_apps {
             report.push_str(&format!("- **{}**: {}\n", display_app_name(&app), format_duration(total_secs)));
+
+            if let Some(titles) = app_titles.get(&app) {
+                let mut sorted_titles: Vec<_> = titles.iter().collect();
+                sorted_titles.sort_by_key(|(_, dur)| std::cmp::Reverse(**dur));
+
+                for (t_name, t_dur) in sorted_titles.into_iter().take(5) {
+                    if *t_dur >= 5 {
+                        report.push_str(&format!("  - *\"{}\"*: {}\n", t_name, format_duration(*t_dur)));
+                    }
+                }
+            }
         }
         report.push_str("\n");
     }
@@ -291,4 +327,28 @@ fn display_app_name(app: &str) -> String {
         "jetbrains-studio" | "studio" => format!("Android Studio ({})", app),
         _ => app.to_string(),
     }
+}
+
+fn clean_window_title(title: &str, _app_class: &str) -> String {
+    let t = title.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+
+    let suffixes = [
+        " - mpv",
+        " - Google Chrome",
+        " - Visual Studio Code",
+        " — Mozilla Firefox",
+        " - Alacritty",
+    ];
+
+    let mut cleaned = t;
+    for suffix in suffixes {
+        if cleaned.ends_with(suffix) {
+            cleaned = &cleaned[..cleaned.len() - suffix.len()];
+        }
+    }
+
+    cleaned.trim().to_string()
 }
