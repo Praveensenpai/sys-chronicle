@@ -38,6 +38,7 @@ pub enum ActivityEvent {
 }
 
 impl ActivityEvent {
+    #[allow(dead_code)]
     pub fn timestamp(&self) -> &str {
         match self {
             ActivityEvent::WindowFocus { timestamp, .. } => timestamp,
