@@ -20,7 +20,7 @@ use monitor::{MetricsMonitor, MpvMonitor, PowerMonitor, WindowMonitor};
 #[command(
     name = "sys-chronicle",
     author = "Praveensenpai",
-    version = "0.3.6",
+    version = env!("CARGO_PKG_VERSION"),
     disable_version_flag = true,
     about = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
 )]
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon { interval } => {
-            println!("[sys-chronicle daemon v0.3.6 starting]");
+            println!("[sys-chronicle daemon v{} starting]", env!("CARGO_PKG_VERSION"));
             println!("[+] Logging to: {:?}", LogWriter::get_logs_dir());
 
             let running = Arc::new(AtomicBool::new(true));

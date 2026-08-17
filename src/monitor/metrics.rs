@@ -141,6 +141,8 @@ impl MetricsMonitor {
         let mut sorted_apps: Vec<(String, AppAcc)> = app_map.into_iter().collect();
         sorted_apps.sort_by_key(|(_, acc)| std::cmp::Reverse(acc.ram_mb));
 
+        let cpu_count = sys.cpus().len().max(1) as f32;
+
         let app_details: Vec<AppDetail> = sorted_apps
             .into_iter()
             .map(|(name, acc)| {
@@ -155,7 +157,7 @@ impl MetricsMonitor {
                     process_count: acc.process_count,
                     ram_mb: acc.ram_mb,
                     ram_pct: app_ram_pct,
-                    cpu_pct: acc.cpu_pct,
+                    cpu_pct: (acc.cpu_pct / cpu_count).clamp(0.0, 100.0),
                 }
             })
             .collect();
