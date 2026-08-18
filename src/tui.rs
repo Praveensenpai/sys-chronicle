@@ -107,6 +107,60 @@ impl SortOrder {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportPreset {
+    Today,
+    Yesterday,
+    Last7Days,
+    Last30Days,
+    SpecificDate,
+    DateRange,
+}
+
+impl ExportPreset {
+    const ALL: [ExportPreset; 6] = [
+        ExportPreset::Today,
+        ExportPreset::Yesterday,
+        ExportPreset::Last7Days,
+        ExportPreset::Last30Days,
+        ExportPreset::SpecificDate,
+        ExportPreset::DateRange,
+    ];
+
+    fn label_with_date(self, now: DateTime<Local>) -> String {
+        let today_str = now.format("%Y-%m-%d").to_string();
+        match self {
+            ExportPreset::Today => format!("1. Today ({})", today_str),
+            ExportPreset::Yesterday => {
+                let yest = now - chrono::Duration::days(1);
+                format!("2. Yesterday ({})", yest.format("%Y-%m-%d"))
+            }
+            ExportPreset::Last7Days => {
+                let start = now - chrono::Duration::days(6);
+                format!("3. Last 7 Days (Week: {} -> {})", start.format("%Y-%m-%d"), today_str)
+            }
+            ExportPreset::Last30Days => {
+                let start = now - chrono::Duration::days(29);
+                format!("4. Last 30 Days (Month: {} -> {})", start.format("%Y-%m-%d"), today_str)
+            }
+            ExportPreset::SpecificDate => "5. Specific Date (Enter custom YYYY-MM-DD)".to_string(),
+            ExportPreset::DateRange => "6. Custom Date Range (Enter Start & End dates)".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExportModalState {
+    Menu { selected: usize },
+    InputSpecificDate { input: String, error: Option<String> },
+    InputDateRange {
+        start_input: String,
+        end_input: String,
+        editing_end: bool,
+        error: Option<String>,
+    },
+}
+
 fn truncate_name(name: &str, max_len: usize) -> String {
     if name.chars().count() > max_len {
         let truncated: String = name.chars().take(max_len.saturating_sub(2)).collect();
@@ -185,6 +239,83 @@ fn compute_daily_screen_time() -> Vec<ScreenTimeEntry> {
     entries
 }
 
+fn execute_export_preset(
+    preset: ExportPreset,
+    export_modal: &mut Option<ExportModalState>,
+    toast_message: &mut Option<(String, Instant)>,
+) {
+    let now = Local::now();
+    let today_str = now.format("%Y-%m-%d").to_string();
+
+    match preset {
+        ExportPreset::Today => {
+            if let Ok(events) = LogWriter::read_events_for_date(&today_str) {
+                let report = generate_ai_report(&events, &format!("Today ({})", today_str));
+                if copy_to_clipboard(&report).is_ok() {
+                    *toast_message = Some(("✔ AI payload for Today copied to clipboard!".to_string(), Instant::now()));
+                } else {
+                    *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                }
+            }
+            *export_modal = None;
+        }
+        ExportPreset::Yesterday => {
+            let yest = now - chrono::Duration::days(1);
+            let yest_str = yest.format("%Y-%m-%d").to_string();
+            if let Ok(events) = LogWriter::read_events_for_date(&yest_str) {
+                let report = generate_ai_report(&events, &format!("Yesterday ({})", yest_str));
+                if copy_to_clipboard(&report).is_ok() {
+                    *toast_message = Some(("✔ AI payload for Yesterday copied to clipboard!".to_string(), Instant::now()));
+                } else {
+                    *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                }
+            }
+            *export_modal = None;
+        }
+        ExportPreset::Last7Days => {
+            if let Ok(events) = LogWriter::read_recent_events(7) {
+                let start_str = (now - chrono::Duration::days(6)).format("%Y-%m-%d").to_string();
+                let title = format!("Past 7 Days ({} to {})", start_str, today_str);
+                let report = generate_ai_report(&events, &title);
+                if copy_to_clipboard(&report).is_ok() {
+                    *toast_message = Some(("✔ AI payload for Last 7 Days copied to clipboard!".to_string(), Instant::now()));
+                } else {
+                    *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                }
+            }
+            *export_modal = None;
+        }
+        ExportPreset::Last30Days => {
+            if let Ok(events) = LogWriter::read_recent_events(30) {
+                let start_str = (now - chrono::Duration::days(29)).format("%Y-%m-%d").to_string();
+                let title = format!("Past 30 Days ({} to {})", start_str, today_str);
+                let report = generate_ai_report(&events, &title);
+                if copy_to_clipboard(&report).is_ok() {
+                    *toast_message = Some(("✔ AI payload for Last 30 Days copied to clipboard!".to_string(), Instant::now()));
+                } else {
+                    *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                }
+            }
+            *export_modal = None;
+        }
+        ExportPreset::SpecificDate => {
+            *export_modal = Some(ExportModalState::InputSpecificDate {
+                input: today_str,
+                error: None,
+            });
+        }
+        ExportPreset::DateRange => {
+            let start_default = (now - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+            *export_modal = Some(ExportModalState::InputDateRange {
+                start_input: start_default,
+                end_input: today_str,
+                editing_end: false,
+                error: None,
+            });
+        }
+    }
+}
+
 pub fn run_status_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -204,6 +335,7 @@ pub fn run_status_tui() -> Result<()> {
     let mut search_active = false;
     let mut search_query = String::new();
     let mut kill_modal_target: Option<AppDetail> = None;
+    let mut export_modal: Option<ExportModalState> = None;
     let mut toast_message: Option<(String, Instant)> = None;
 
     let mut list_state = ListState::default();
@@ -656,6 +788,129 @@ pub fn run_status_tui() -> Result<()> {
 
                 f.render_widget(modal_block, area);
             }
+
+            // Render Export Time-Range Selection Modal
+            if let Some(export_state) = &export_modal {
+                let area = centered_rect(58, 40, f.size());
+                f.render_widget(Clear, area);
+
+                match export_state {
+                    ExportModalState::Menu { selected } => {
+                        let mut lines = vec![
+                            Line::from(vec![
+                                Span::styled("📋 Export AI Activity Chronicle", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                            ]),
+                            Line::from(Span::styled("Select time range to copy formatted Markdown payload to clipboard (wl-copy):", Style::default().fg(Color::Gray))),
+                            Line::from(""),
+                        ];
+
+                        for (idx, preset) in ExportPreset::ALL.iter().enumerate() {
+                            let label = preset.label_with_date(now);
+                            if idx == *selected {
+                                lines.push(Line::from(vec![
+                                    Span::styled(" ▶ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                                    Span::styled(label, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::Rgb(40, 50, 70))),
+                                ]));
+                            } else {
+                                lines.push(Line::from(vec![
+                                    Span::styled("   ", Style::default()),
+                                    Span::styled(label, Style::default().fg(Color::White)),
+                                ]));
+                            }
+                        }
+
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(vec![
+                            Span::styled(" [↑/↓/j/k] Navigate  [1-6] Quick Select  [Enter] Confirm  [Esc] Cancel ", Style::default().fg(Color::DarkGray)),
+                        ]));
+
+                        let block = Paragraph::new(lines)
+                            .block(Block::default().title(" 📋 Export AI Payload ").borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
+                        f.render_widget(block, area);
+                    }
+                    ExportModalState::InputSpecificDate { input, error } => {
+                        let mut lines = vec![
+                            Line::from(vec![
+                                Span::styled("📅 Export Specific Date", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                            ]),
+                            Line::from(Span::styled("Enter target date in YYYY-MM-DD format:", Style::default().fg(Color::Gray))),
+                            Line::from(""),
+                            Line::from(vec![
+                                Span::styled(" Date: [ ", Style::default().fg(Color::White)),
+                                Span::styled(input, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                                Span::styled("█", Style::default().fg(Color::Cyan)),
+                                Span::styled(" ]", Style::default().fg(Color::White)),
+                            ]),
+                            Line::from(""),
+                        ];
+
+                        if let Some(err_msg) = error {
+                            lines.push(Line::from(Span::styled(format!(" ⚠️  {}", err_msg), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))));
+                        } else {
+                            lines.push(Line::from(Span::styled(" Example: 2026-08-15", Style::default().fg(Color::DarkGray))));
+                        }
+
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(vec![
+                            Span::styled(" [Enter] Export & Copy  [Esc] Back to Menu ", Style::default().fg(Color::DarkGray)),
+                        ]));
+
+                        let block = Paragraph::new(lines)
+                            .block(Block::default().title(" 📅 Specific Date Export ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
+                        f.render_widget(block, area);
+                    }
+                    ExportModalState::InputDateRange { start_input, end_input, editing_end, error } => {
+                        let start_style = if !*editing_end {
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::Rgb(40, 50, 70))
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        let end_style = if *editing_end {
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::Rgb(40, 50, 70))
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+
+                        let mut lines = vec![
+                            Line::from(vec![
+                                Span::styled("📅 Export Custom Date Range", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                            ]),
+                            Line::from(Span::styled("Enter start and end dates (YYYY-MM-DD):", Style::default().fg(Color::Gray))),
+                            Line::from(""),
+                            Line::from(vec![
+                                Span::styled(" Start Date: [ ", Style::default().fg(Color::White)),
+                                Span::styled(start_input, start_style),
+                                if !*editing_end { Span::styled("█", Style::default().fg(Color::Cyan)) } else { Span::raw("") },
+                                Span::styled(" ]", Style::default().fg(Color::White)),
+                                if !*editing_end { Span::styled(" ◀ active", Style::default().fg(Color::Yellow)) } else { Span::raw("") },
+                            ]),
+                            Line::from(vec![
+                                Span::styled(" End Date:   [ ", Style::default().fg(Color::White)),
+                                Span::styled(end_input, end_style),
+                                if *editing_end { Span::styled("█", Style::default().fg(Color::Cyan)) } else { Span::raw("") },
+                                Span::styled(" ]", Style::default().fg(Color::White)),
+                                if *editing_end { Span::styled(" ◀ active", Style::default().fg(Color::Yellow)) } else { Span::raw("") },
+                            ]),
+                            Line::from(""),
+                        ];
+
+                        if let Some(err_msg) = error {
+                            lines.push(Line::from(Span::styled(format!(" ⚠️  {}", err_msg), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))));
+                        } else {
+                            lines.push(Line::from(Span::styled(" Use Tab to switch between Start Date and End Date", Style::default().fg(Color::DarkGray))));
+                        }
+
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(vec![
+                            Span::styled(" [Tab] Switch Field  [Enter] Confirm & Export  [Esc] Back to Menu ", Style::default().fg(Color::DarkGray)),
+                        ]));
+
+                        let block = Paragraph::new(lines)
+                            .block(Block::default().title(" 📅 Date Range Export ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
+                        f.render_widget(block, area);
+                    }
+                }
+            }
         })?;
 
         // Poll for keypress with 1s timeout
@@ -673,6 +928,190 @@ pub fn run_status_tui() -> Result<()> {
                             kill_modal_target = None;
                         }
                         _ => {}
+                    }
+                    continue;
+                }
+
+                // If Export Modal is active, intercept keypresses
+                if let Some(mut state) = export_modal.clone() {
+                    match &mut state {
+                        ExportModalState::Menu { selected } => {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::Char('q') => {
+                                    export_modal = None;
+                                }
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    *selected = if *selected == 0 { ExportPreset::ALL.len() - 1 } else { *selected - 1 };
+                                    export_modal = Some(ExportModalState::Menu { selected: *selected });
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    *selected = (*selected + 1) % ExportPreset::ALL.len();
+                                    export_modal = Some(ExportModalState::Menu { selected: *selected });
+                                }
+                                KeyCode::Char('1') => {
+                                    execute_export_preset(ExportPreset::Today, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Char('2') => {
+                                    execute_export_preset(ExportPreset::Yesterday, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Char('3') => {
+                                    execute_export_preset(ExportPreset::Last7Days, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Char('4') => {
+                                    execute_export_preset(ExportPreset::Last30Days, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Char('5') => {
+                                    execute_export_preset(ExportPreset::SpecificDate, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Char('6') => {
+                                    execute_export_preset(ExportPreset::DateRange, &mut export_modal, &mut toast_message);
+                                }
+                                KeyCode::Enter => {
+                                    let preset = ExportPreset::ALL[*selected];
+                                    execute_export_preset(preset, &mut export_modal, &mut toast_message);
+                                }
+                                _ => {}
+                            }
+                        }
+                        ExportModalState::InputSpecificDate { input, error: _ } => {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    export_modal = Some(ExportModalState::Menu { selected: 4 });
+                                }
+                                KeyCode::Backspace => {
+                                    input.pop();
+                                    export_modal = Some(ExportModalState::InputSpecificDate { input: input.clone(), error: None });
+                                }
+                                KeyCode::Char(c) if (c.is_ascii_digit() || c == '-') && input.len() < 10 => {
+                                    input.push(c);
+                                    export_modal = Some(ExportModalState::InputSpecificDate { input: input.clone(), error: None });
+                                }
+                                KeyCode::Enter => {
+                                    if chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d").is_ok() {
+                                        match LogWriter::read_events_for_date(input) {
+                                            Ok(events) => {
+                                                let report = generate_ai_report(&events, input);
+                                                if copy_to_clipboard(&report).is_ok() {
+                                                    toast_message = Some((format!("✔ AI payload for {} copied to clipboard!", input), Instant::now()));
+                                                } else {
+                                                    toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                                                }
+                                                export_modal = None;
+                                            }
+                                            Err(e) => {
+                                                export_modal = Some(ExportModalState::InputSpecificDate {
+                                                    input: input.clone(),
+                                                    error: Some(format!("Error reading logs: {}", e)),
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        export_modal = Some(ExportModalState::InputSpecificDate {
+                                            input: input.clone(),
+                                            error: Some("Invalid format! Use YYYY-MM-DD (e.g. 2026-08-18)".to_string()),
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        ExportModalState::InputDateRange { start_input, end_input, editing_end, error: _ } => {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    export_modal = Some(ExportModalState::Menu { selected: 5 });
+                                }
+                                KeyCode::Tab => {
+                                    *editing_end = !*editing_end;
+                                    export_modal = Some(ExportModalState::InputDateRange {
+                                        start_input: start_input.clone(),
+                                        end_input: end_input.clone(),
+                                        editing_end: *editing_end,
+                                        error: None,
+                                    });
+                                }
+                                KeyCode::Backspace => {
+                                    if *editing_end {
+                                        end_input.pop();
+                                    } else {
+                                        start_input.pop();
+                                    }
+                                    export_modal = Some(ExportModalState::InputDateRange {
+                                        start_input: start_input.clone(),
+                                        end_input: end_input.clone(),
+                                        editing_end: *editing_end,
+                                        error: None,
+                                    });
+                                }
+                                KeyCode::Char(c) if (c.is_ascii_digit() || c == '-') => {
+                                    if *editing_end {
+                                        if end_input.len() < 10 { end_input.push(c); }
+                                    } else if start_input.len() < 10 {
+                                        start_input.push(c);
+                                    }
+                                    export_modal = Some(ExportModalState::InputDateRange {
+                                        start_input: start_input.clone(),
+                                        end_input: end_input.clone(),
+                                        editing_end: *editing_end,
+                                        error: None,
+                                    });
+                                }
+                                KeyCode::Enter => {
+                                    if !*editing_end {
+                                        export_modal = Some(ExportModalState::InputDateRange {
+                                            start_input: start_input.clone(),
+                                            end_input: end_input.clone(),
+                                            editing_end: true,
+                                            error: None,
+                                        });
+                                    } else {
+                                        let s_res = chrono::NaiveDate::parse_from_str(start_input, "%Y-%m-%d");
+                                        let e_res = chrono::NaiveDate::parse_from_str(end_input, "%Y-%m-%d");
+                                        match (s_res, e_res) {
+                                            (Ok(s_date), Ok(e_date)) => {
+                                                if s_date > e_date {
+                                                    export_modal = Some(ExportModalState::InputDateRange {
+                                                        start_input: start_input.clone(),
+                                                        end_input: end_input.clone(),
+                                                        editing_end: *editing_end,
+                                                        error: Some("Start date cannot be after end date!".to_string()),
+                                                    });
+                                                } else {
+                                                    match LogWriter::read_events_for_date_range(start_input, end_input) {
+                                                        Ok(events) => {
+                                                            let title = format!("{} to {}", start_input, end_input);
+                                                            let report = generate_ai_report(&events, &title);
+                                                            if copy_to_clipboard(&report).is_ok() {
+                                                                toast_message = Some((format!("✔ AI payload for {} copied to clipboard!", title), Instant::now()));
+                                                            } else {
+                                                                toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                                                            }
+                                                            export_modal = None;
+                                                        }
+                                                        Err(e) => {
+                                                            export_modal = Some(ExportModalState::InputDateRange {
+                                                                start_input: start_input.clone(),
+                                                                end_input: end_input.clone(),
+                                                                editing_end: *editing_end,
+                                                                error: Some(format!("Error reading logs: {}", e)),
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                export_modal = Some(ExportModalState::InputDateRange {
+                                                    start_input: start_input.clone(),
+                                                    end_input: end_input.clone(),
+                                                    editing_end: *editing_end,
+                                                    error: Some("Invalid dates! Format must be YYYY-MM-DD".to_string()),
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     continue;
                 }
@@ -713,15 +1152,7 @@ pub fn run_status_tui() -> Result<()> {
                         }
                     }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
-                        let title_date = Local::now().format("%Y-%m-%d").to_string();
-                        if let Ok(events) = LogWriter::read_events_for_date(&title_date) {
-                            let report = generate_ai_report(&events, &title_date);
-                            if copy_to_clipboard(&report).is_ok() {
-                                toast_message = Some(("✔ AI payload copied to clipboard!".to_string(), Instant::now()));
-                            } else {
-                                toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
-                            }
-                        }
+                        export_modal = Some(ExportModalState::Menu { selected: 0 });
                     }
                     KeyCode::Char('p') | KeyCode::Char('P') => {
                         if is_paused {

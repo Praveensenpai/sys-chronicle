@@ -85,4 +85,23 @@ impl LogWriter {
 
         Ok(all_events)
     }
+
+    pub fn read_events_for_date_range(start_date: &str, end_date: &str) -> Result<Vec<ActivityEvent>> {
+        let start = chrono::NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
+            .with_context(|| format!("Invalid start date format: '{}'", start_date))?;
+        let end = chrono::NaiveDate::parse_from_str(end_date, "%Y-%m-%d")
+            .with_context(|| format!("Invalid end date format: '{}'", end_date))?;
+
+        let mut all_events = Vec::new();
+        let mut curr = start;
+        while curr <= end {
+            let date_str = curr.format("%Y-%m-%d").to_string();
+            if let Ok(events) = Self::read_events_for_date(&date_str) {
+                all_events.extend(events);
+            }
+            curr += chrono::Duration::days(1);
+        }
+
+        Ok(all_events)
+    }
 }
