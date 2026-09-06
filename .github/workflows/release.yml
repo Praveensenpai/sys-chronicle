@@ -2,28 +2,38 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   build-release:
-    name: Build and Upload Release Asset
+    name: Build & Release Binary
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Rust
+      - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "sys-chronicle-release"
+          save-if: true
 
       - name: Build Release Binary
         run: cargo build --release
 
       - name: Package Binary
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           mkdir -p dist
           cp target/release/sys-chronicle dist/
@@ -31,6 +41,7 @@ jobs:
           tar -czvf sys-chronicle-linux-x86_64.tar.gz sys-chronicle
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/sys-chronicle-linux-x86_64.tar.gz
