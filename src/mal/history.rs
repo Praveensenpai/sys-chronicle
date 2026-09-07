@@ -64,10 +64,17 @@ pub struct AnimeSyncHistory;
 
 impl AnimeSyncHistory {
     pub fn storage_path() -> PathBuf {
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-            .join("sys-chronicle")
-            .join("anime_sync_history.json")
+        #[cfg(test)]
+        {
+            std::env::temp_dir().join("sys_chronicle_test_anime_sync_history.json")
+        }
+        #[cfg(not(test))]
+        {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+                .join("sys-chronicle")
+                .join("anime_sync_history.json")
+        }
     }
 
     pub fn load_all() -> Result<Vec<AnimeSyncRecord>> {
