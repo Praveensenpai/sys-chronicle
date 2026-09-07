@@ -36,6 +36,14 @@ enum Commands {
         #[arg(long, short)]
         force: bool,
     },
+    /// View or configure MAL settings (e.g. toast duration)
+    Config {
+        /// Set toast notification duration in seconds (e.g. 2)
+        #[arg(long, short)]
+        toast: Option<u32>,
+        /// Positional toast notification duration in seconds
+        seconds: Option<u32>,
+    },
     /// Hook mode (reads ActivityEvent JSON from stdin)
     Hook,
 }
@@ -56,6 +64,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Sync { name, force }) => {
             run_sync(&name, force).await?;
+        }
+        Some(Commands::Config { toast, seconds }) => {
+            run_config(toast.or(seconds)).await?;
         }
         Some(Commands::Hook) | None => {
             if io::stdin().is_terminal() && cli.command.is_none() {
@@ -223,6 +234,31 @@ async fn run_sync(name: &str, force: bool) -> Result<()> {
         None => {
             println!("[-] Sync could not be completed.");
         }
+    }
+    Ok(())
+}
+
+async fn run_config(toast_timeout: Option<u32>) -> Result<()> {
+    let mut config = MalAuth::load_config()?;
+    if let Some(secs) = toast_timeout {
+        config.toast_timeout_secs = Some(secs);
+        MalAuth::save_config(&config)?;
+        println!(
+            "✔ Toast notification duration set to {}s ({}ms).",
+            secs,
+            secs * 1000
+        );
+    } else {
+        println!("=== MyAnimeList Configuration ===");
+        println!("Config file:    {:?}", MalAuth::config_path());
+        println!("Client ID:      {}", config.client_id);
+        println!(
+            "Toast duration: {}s (default: 2s)",
+            config.toast_timeout_secs.unwrap_or(2)
+        );
+        println!(
+            "\nUsage to change: sys-chronicle-mal config <seconds> (e.g. `sys-chronicle-mal config 2`)"
+        );
     }
     Ok(())
 }

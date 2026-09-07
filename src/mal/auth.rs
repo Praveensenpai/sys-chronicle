@@ -26,6 +26,8 @@ pub struct MalConfig {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toast_timeout_secs: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +130,7 @@ impl MalAuth {
             access_token: token_resp.access_token,
             refresh_token: token_resp.refresh_token,
             expires_at,
+            toast_timeout_secs: Some(2),
         };
 
         Self::save_config(&config)?;

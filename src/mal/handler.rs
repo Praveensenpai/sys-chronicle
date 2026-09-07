@@ -241,11 +241,19 @@ impl MalHandler {
     }
 
     fn send_notification(title: &str, msg: &str) {
+        let timeout_secs = MalAuth::load_config()
+            .ok()
+            .and_then(|c| c.toast_timeout_secs)
+            .unwrap_or(2);
+        let timeout_ms = (timeout_secs * 1000).to_string();
+
         let _ = Command::new("notify-send")
             .arg("-a")
             .arg("sys-chronicle-mal")
             .arg("-i")
             .arg("video-player")
+            .arg("-t")
+            .arg(&timeout_ms)
             .arg(format!("MAL: {}", title))
             .arg(msg)
             .status();
