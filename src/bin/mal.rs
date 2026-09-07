@@ -28,6 +28,14 @@ enum Commands {
         /// File path or media title to test
         name: String,
     },
+    /// Manually sync an anime episode to MyAnimeList
+    Sync {
+        /// File path or media title
+        name: String,
+        /// Force update even if MAL progress is already ahead
+        #[arg(long, short)]
+        force: bool,
+    },
     /// Hook mode (reads ActivityEvent JSON from stdin)
     Hook,
 }
@@ -45,6 +53,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Test { name }) => {
             run_test(&name).await?;
+        }
+        Some(Commands::Sync { name, force }) => {
+            run_sync(&name, force).await?;
         }
         Some(Commands::Hook) | None => {
             if io::stdin().is_terminal() && cli.command.is_none() {
@@ -196,5 +207,22 @@ async fn run_test(name: &str) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn run_sync(name: &str, force: bool) -> Result<()> {
+    println!("Manually syncing: \"{}\" (force: {})", name, force);
+    match MalHandler::sync_media_with_options(name, 0, 0, force).await? {
+        Some(record) => {
+            let (badge, _) = record.status.badge();
+            println!(
+                "Status: {} ({} Ep {})",
+                badge, record.canonical_title, record.episode
+            );
+        }
+        None => {
+            println!("[-] Sync could not be completed.");
+        }
+    }
     Ok(())
 }

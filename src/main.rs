@@ -1,5 +1,6 @@
 mod exporter;
 mod logger;
+pub mod mal;
 mod monitor;
 pub mod plugin;
 mod service;

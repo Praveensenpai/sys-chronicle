@@ -42,11 +42,13 @@ sys-chronicle status
 
 | Shortcut | Action | Description |
 | :---: | :--- | :--- |
-| **`Tab`** | **Toggle View Tab** | Switch between **Live Dashboard** and **Daily Analytics** (accumulated screen time) |
-| **`/`** | **Fuzzy Search** | Filter running applications in real-time as you type |
+| **`Tab`** | **Cycle Views** | Cycle across **Live Dashboard** ➔ **Daily Analytics** ➔ **Anime & MAL Sync** |
+| **`/`** | **Fuzzy Search** | Filter running applications in real-time as you type *(Live/Analytics)* |
 | **`K`** | **Kill Application** | Opens red confirmation modal to terminate selected app processes (`SIGTERM`) |
 | **`e`** | **Instant AI Export** | Formats today's activity into Markdown payload and copies to clipboard (`wl-copy`) |
-| **`s`** | **Toggle Sort Metric** | Switch application sorting between **`RAM`** and **`CPU`** load |
+| **`s`** / **`Enter`** | **Sync Anime / Sort** | On Anime tab: manual sync to MAL. On Live tab: toggle RAM/CPU sort |
+| **`f`** | **Force Sync Anime** | On Anime tab: opens confirmation modal to force overwrite MAL when MAL is ahead |
+| **`r`** | **Refresh Anime** | On Anime tab: reloads playback history from disk |
 | **`o`** | **Toggle Sort Order** | Toggle sorting order (**`Descending ↓`** ↔ **`Ascending ↑`**) |
 | **`t`** | **Toggle List Limit** | Cycle application limit count (**`10`** ➔ **`25`** ➔ **`All`**) |
 | **`p`** | **Pause / Resume** | Freeze live sampling with relative timestamp badge (`⏸️ PAUSED (X ago)`) |
@@ -114,6 +116,9 @@ Unlike naive scrobblers that merely check `time-pos / duration >= 0.8` (which fa
 ### Features
 - 🔑 **Official MAL API v2 with PKCE OAuth2**: Secure interactive browser login with zero secret leaking.
 - 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash Lite (`gemini-3.5-flash-lite`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
+- 📊 **Dedicated 3rd TUI Tab (`sys-chronicle status`)**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[⏳ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[✗ FAILED]`).
+- 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes (e.g. Episode 4 reaching 80%) from overwriting higher progress already recorded on MyAnimeList (e.g. Episode 6).
+- ⚡ **Manual & Force Sync**: Trigger instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.
 - 🔔 **Desktop Notifications**: Sends desktop alerts via `notify-send` when an episode is updated.
 
 ### Setup & Usage
@@ -128,7 +133,11 @@ sys-chronicle-mal status
 # 3. Test anime parsing on any video filename
 sys-chronicle-mal test "[SubsPlease] Sousou no Frieren - 04 (1080p) [9A1B2C3D].mkv"
 
-# 4. Link as an active plugin for sys-chronicle (handled automatically by install.sh)
+# 4. Manually sync an anime title (with optional --force to overwrite MAL)
+sys-chronicle-mal sync "Sousou no Frieren"
+sys-chronicle-mal sync "Sousou no Frieren" --force
+
+# 5. Link as an active plugin for sys-chronicle (handled automatically by install.sh)
 mkdir -p ~/.config/sys-chronicle/plugins
 ln -sf ~/.local/bin/sys-chronicle-mal ~/.config/sys-chronicle/plugins/sys-chronicle-mal
 ```

@@ -24,10 +24,15 @@ use crate::logger::{ActivityEvent, LogWriter};
 use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
+mod media_inspector;
+mod media_tab;
+use media_tab::{render_media_tab, MediaTabState};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveTab {
     Live,
     Analytics,
+    MediaSync,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +382,7 @@ pub fn run_status_tui() -> Result<()> {
     let mut kill_modal_target: Option<AppDetail> = None;
     let mut export_modal: Option<ExportModalState> = None;
     let mut toast_message: Option<(String, Instant)> = None;
+    let mut media_tab_state = MediaTabState::new();
 
     let mut list_state = ListState::default();
     list_state.select(Some(0));
@@ -500,6 +506,12 @@ pub fn run_status_tui() -> Result<()> {
                 Style::default().fg(Color::DarkGray)
             };
 
+            let media_tab_style = if active_tab == ActiveTab::MediaSync {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
             // Toast feedback
             let toast_span = if let Some((ref msg, inst)) = toast_message {
                 if inst.elapsed() < Duration::from_secs(3) {
@@ -520,6 +532,8 @@ pub fn run_status_tui() -> Result<()> {
                 Span::styled("Live Dashboard (Tab)", live_tab_style),
                 Span::raw("] ["),
                 Span::styled("Daily Analytics (Tab)", analytics_tab_style),
+                Span::raw("] ["),
+                Span::styled("Anime & MAL Sync (Tab)", media_tab_style),
                 Span::raw("]"),
                 toast_span,
             ]))
@@ -776,31 +790,52 @@ pub fn run_status_tui() -> Result<()> {
 
                     f.render_widget(analytics_list, chunks[3]);
                 }
+                ActiveTab::MediaSync => {
+                    render_media_tab(f, chunks[3], &mut media_tab_state);
+                }
             }
 
             // Footer Controls
             let pause_action_str = if is_paused { "resume" } else { "pause" };
-            let footer_lines = vec![
-                Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Tab", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                Span::styled(" view | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("/", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(" search | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("K", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                Span::styled(" kill | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("e", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::styled(" AI export | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("s", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" sort ({}) | ", sort_metric.label()), Style::default().fg(Color::DarkGray)),
-                Span::styled("o", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" order ({}) | ", sort_order.symbol()), Style::default().fg(Color::DarkGray)),
-                Span::styled("t", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" limit ({}) | ", limit_mode.label()), Style::default().fg(Color::DarkGray)),
-                Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" {} | ", pause_action_str), Style::default().fg(Color::DarkGray)),
-                Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" exit", Style::default().fg(Color::DarkGray)),
-            ];
+            let footer_lines = if active_tab == ActiveTab::MediaSync {
+                vec![
+                    Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Tab", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(" view | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("↑/↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(" select | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("s / Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(" manual sync | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("f", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" force sync (override MAL) | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("r", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(" refresh | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" exit", Style::default().fg(Color::DarkGray)),
+                ]
+            } else {
+                vec![
+                    Span::styled(" Keys: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Tab", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(" view | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("/", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(" search | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("K", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::styled(" kill | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("e", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(" AI export | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("s", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" sort ({}) | ", sort_metric.label()), Style::default().fg(Color::DarkGray)),
+                    Span::styled("o", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" order ({}) | ", sort_order.symbol()), Style::default().fg(Color::DarkGray)),
+                    Span::styled("t", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" limit ({}) | ", limit_mode.label()), Style::default().fg(Color::DarkGray)),
+                    Span::styled("p", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {} | ", pause_action_str), Style::default().fg(Color::DarkGray)),
+                    Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" exit", Style::default().fg(Color::DarkGray)),
+                ]
+            };
             let footer = Paragraph::new(Line::from(footer_lines));
             f.render_widget(footer, chunks[4]);
 
@@ -1272,6 +1307,50 @@ pub fn run_status_tui() -> Result<()> {
                     continue;
                 }
 
+                // MediaSync Tab Key Dispatcher
+                if active_tab == ActiveTab::MediaSync {
+                    if media_tab_state.confirming_force_sync {
+                        match key.code {
+                            KeyCode::Char('f') | KeyCode::Char('F') => {
+                                media_tab_state.trigger_sync(true);
+                            }
+                            KeyCode::Esc => {
+                                media_tab_state.confirming_force_sync = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Char('q') => break,
+                        KeyCode::Tab => {
+                            active_tab = ActiveTab::Live;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            media_tab_state.select_next();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            media_tab_state.select_prev();
+                        }
+                        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Enter => {
+                            media_tab_state.trigger_sync(false);
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            media_tab_state.trigger_sync(true);
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            media_tab_state.refresh();
+                            media_tab_state.set_status("Refreshed anime playback history.".into());
+                        }
+                        KeyCode::Esc => {
+                            active_tab = ActiveTab::Live;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 // Standard Key Dispatcher
                 let current_sel = list_state.selected().unwrap_or(0);
                 match key.code {
@@ -1279,7 +1358,11 @@ pub fn run_status_tui() -> Result<()> {
                     KeyCode::Tab => {
                         active_tab = match active_tab {
                             ActiveTab::Live => ActiveTab::Analytics,
-                            ActiveTab::Analytics => ActiveTab::Live,
+                            ActiveTab::Analytics => {
+                                media_tab_state.refresh();
+                                ActiveTab::MediaSync
+                            }
+                            ActiveTab::MediaSync => ActiveTab::Live,
                         };
                     }
                     KeyCode::Char('/') => {
