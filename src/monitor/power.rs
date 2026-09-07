@@ -76,7 +76,7 @@ impl PowerMonitor {
                         old_status != &state.status
                             || old_ac != &state.ac_online
                             || (old_cap.abs_diff(state.capacity) >= 2)
-                            || (poll_count % 60 == 0) // Log snapshot every ~5 minutes (60 * 5s)
+                            || poll_count.is_multiple_of(60) // Log snapshot every ~5 minutes (60 * 5s)
                     }
                     None => true,
                 };

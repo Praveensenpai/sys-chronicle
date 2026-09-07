@@ -137,11 +137,19 @@ impl ExportPreset {
             }
             ExportPreset::Last7Days => {
                 let start = now - chrono::Duration::days(6);
-                format!("3. Last 7 Days (Week: {} -> {})", start.format("%Y-%m-%d"), today_str)
+                format!(
+                    "3. Last 7 Days (Week: {} -> {})",
+                    start.format("%Y-%m-%d"),
+                    today_str
+                )
             }
             ExportPreset::Last30Days => {
                 let start = now - chrono::Duration::days(29);
-                format!("4. Last 30 Days (Month: {} -> {})", start.format("%Y-%m-%d"), today_str)
+                format!(
+                    "4. Last 30 Days (Month: {} -> {})",
+                    start.format("%Y-%m-%d"),
+                    today_str
+                )
             }
             ExportPreset::SpecificDate => "5. Specific Date (Enter custom YYYY-MM-DD)".to_string(),
             ExportPreset::DateRange => "6. Custom Date Range (Enter Start & End dates)".to_string(),
@@ -151,8 +159,13 @@ impl ExportPreset {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ExportModalState {
-    Menu { selected: usize },
-    InputSpecificDate { input: String, error: Option<String> },
+    Menu {
+        selected: usize,
+    },
+    InputSpecificDate {
+        input: String,
+        error: Option<String>,
+    },
     InputDateRange {
         start_input: String,
         end_input: String,
@@ -210,7 +223,13 @@ fn compute_daily_screen_time() -> Vec<ScreenTimeEntry> {
     let mut window_events: Vec<(DateTime<Local>, String)> = Vec::new();
 
     for event in events {
-        if let ActivityEvent::WindowFocus { timestamp, app_class, duration_secs, .. } = event {
+        if let ActivityEvent::WindowFocus {
+            timestamp,
+            app_class,
+            duration_secs,
+            ..
+        } = event
+        {
             if let Some(dur) = duration_secs {
                 *duration_map.entry(app_class).or_insert(0) += dur as i64;
             } else if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp) {
@@ -232,7 +251,10 @@ fn compute_daily_screen_time() -> Vec<ScreenTimeEntry> {
 
     let mut entries: Vec<ScreenTimeEntry> = duration_map
         .into_iter()
-        .map(|(app_name, total_seconds)| ScreenTimeEntry { app_name, total_seconds })
+        .map(|(app_name, total_seconds)| ScreenTimeEntry {
+            app_name,
+            total_seconds,
+        })
         .collect();
 
     entries.sort_by_key(|e| std::cmp::Reverse(e.total_seconds));
@@ -252,7 +274,10 @@ fn execute_export_preset(
             if let Ok(events) = LogWriter::read_events_for_date(&today_str) {
                 let report = generate_ai_report(&events, &format!("Today ({})", today_str));
                 if copy_to_clipboard(&report).is_ok() {
-                    *toast_message = Some(("✔ AI payload for Today copied to clipboard!".to_string(), Instant::now()));
+                    *toast_message = Some((
+                        "✔ AI payload for Today copied to clipboard!".to_string(),
+                        Instant::now(),
+                    ));
                 } else {
                     *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
                 }
@@ -265,7 +290,10 @@ fn execute_export_preset(
             if let Ok(events) = LogWriter::read_events_for_date(&yest_str) {
                 let report = generate_ai_report(&events, &format!("Yesterday ({})", yest_str));
                 if copy_to_clipboard(&report).is_ok() {
-                    *toast_message = Some(("✔ AI payload for Yesterday copied to clipboard!".to_string(), Instant::now()));
+                    *toast_message = Some((
+                        "✔ AI payload for Yesterday copied to clipboard!".to_string(),
+                        Instant::now(),
+                    ));
                 } else {
                     *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
                 }
@@ -274,11 +302,16 @@ fn execute_export_preset(
         }
         ExportPreset::Last7Days => {
             if let Ok(events) = LogWriter::read_recent_events(7) {
-                let start_str = (now - chrono::Duration::days(6)).format("%Y-%m-%d").to_string();
+                let start_str = (now - chrono::Duration::days(6))
+                    .format("%Y-%m-%d")
+                    .to_string();
                 let title = format!("Past 7 Days ({} to {})", start_str, today_str);
                 let report = generate_ai_report(&events, &title);
                 if copy_to_clipboard(&report).is_ok() {
-                    *toast_message = Some(("✔ AI payload for Last 7 Days copied to clipboard!".to_string(), Instant::now()));
+                    *toast_message = Some((
+                        "✔ AI payload for Last 7 Days copied to clipboard!".to_string(),
+                        Instant::now(),
+                    ));
                 } else {
                     *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
                 }
@@ -287,11 +320,16 @@ fn execute_export_preset(
         }
         ExportPreset::Last30Days => {
             if let Ok(events) = LogWriter::read_recent_events(30) {
-                let start_str = (now - chrono::Duration::days(29)).format("%Y-%m-%d").to_string();
+                let start_str = (now - chrono::Duration::days(29))
+                    .format("%Y-%m-%d")
+                    .to_string();
                 let title = format!("Past 30 Days ({} to {})", start_str, today_str);
                 let report = generate_ai_report(&events, &title);
                 if copy_to_clipboard(&report).is_ok() {
-                    *toast_message = Some(("✔ AI payload for Last 30 Days copied to clipboard!".to_string(), Instant::now()));
+                    *toast_message = Some((
+                        "✔ AI payload for Last 30 Days copied to clipboard!".to_string(),
+                        Instant::now(),
+                    ));
                 } else {
                     *toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
                 }
@@ -305,7 +343,9 @@ fn execute_export_preset(
             });
         }
         ExportPreset::DateRange => {
-            let start_default = (now - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+            let start_default = (now - chrono::Duration::days(7))
+                .format("%Y-%m-%d")
+                .to_string();
             *export_modal = Some(ExportModalState::InputDateRange {
                 start_input: start_default,
                 end_input: today_str,
@@ -366,7 +406,10 @@ pub fn run_status_tui() -> Result<()> {
         let mut sorted_apps: Vec<AppDetail> = metrics.app_details.clone();
         if !search_query.trim().is_empty() {
             let query = search_query.to_lowercase();
-            sorted_apps.retain(|app| app.name.to_lowercase().contains(&query) || app.exe_path.to_lowercase().contains(&query));
+            sorted_apps.retain(|app| {
+                app.name.to_lowercase().contains(&query)
+                    || app.exe_path.to_lowercase().contains(&query)
+            });
         }
 
         // Apply sorting to app details
@@ -378,10 +421,18 @@ pub fn run_status_tui() -> Result<()> {
                 sorted_apps.sort_by_key(|a| a.ram_mb);
             }
             (SortMetric::Cpu, SortOrder::Descending) => {
-                sorted_apps.sort_by(|a, b| b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+                sorted_apps.sort_by(|a, b| {
+                    b.cpu_pct
+                        .partial_cmp(&a.cpu_pct)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
             (SortMetric::Cpu, SortOrder::Ascending) => {
-                sorted_apps.sort_by(|a, b| a.cpu_pct.partial_cmp(&b.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+                sorted_apps.sort_by(|a, b| {
+                    a.cpu_pct
+                        .partial_cmp(&b.cpu_pct)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
         }
 
@@ -921,7 +972,13 @@ pub fn run_status_tui() -> Result<()> {
                     match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             let terminated_count = kill_app_processes(&mut sys, &target);
-                            toast_message = Some((format!("✔ Terminated {} instance(s) of '{}'", terminated_count, target.name), Instant::now()));
+                            toast_message = Some((
+                                format!(
+                                    "✔ Terminated {} instance(s) of '{}'",
+                                    terminated_count, target.name
+                                ),
+                                Instant::now(),
+                            ));
                             kill_modal_target = None;
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -935,44 +992,78 @@ pub fn run_status_tui() -> Result<()> {
                 // If Export Modal is active, intercept keypresses
                 if let Some(mut state) = export_modal.clone() {
                     match &mut state {
-                        ExportModalState::Menu { selected } => {
-                            match key.code {
-                                KeyCode::Esc | KeyCode::Char('q') => {
-                                    export_modal = None;
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    *selected = if *selected == 0 { ExportPreset::ALL.len() - 1 } else { *selected - 1 };
-                                    export_modal = Some(ExportModalState::Menu { selected: *selected });
-                                }
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    *selected = (*selected + 1) % ExportPreset::ALL.len();
-                                    export_modal = Some(ExportModalState::Menu { selected: *selected });
-                                }
-                                KeyCode::Char('1') => {
-                                    execute_export_preset(ExportPreset::Today, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Char('2') => {
-                                    execute_export_preset(ExportPreset::Yesterday, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Char('3') => {
-                                    execute_export_preset(ExportPreset::Last7Days, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Char('4') => {
-                                    execute_export_preset(ExportPreset::Last30Days, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Char('5') => {
-                                    execute_export_preset(ExportPreset::SpecificDate, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Char('6') => {
-                                    execute_export_preset(ExportPreset::DateRange, &mut export_modal, &mut toast_message);
-                                }
-                                KeyCode::Enter => {
-                                    let preset = ExportPreset::ALL[*selected];
-                                    execute_export_preset(preset, &mut export_modal, &mut toast_message);
-                                }
-                                _ => {}
+                        ExportModalState::Menu { selected } => match key.code {
+                            KeyCode::Esc | KeyCode::Char('q') => {
+                                export_modal = None;
                             }
-                        }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                *selected = if *selected == 0 {
+                                    ExportPreset::ALL.len() - 1
+                                } else {
+                                    *selected - 1
+                                };
+                                export_modal = Some(ExportModalState::Menu {
+                                    selected: *selected,
+                                });
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                *selected = (*selected + 1) % ExportPreset::ALL.len();
+                                export_modal = Some(ExportModalState::Menu {
+                                    selected: *selected,
+                                });
+                            }
+                            KeyCode::Char('1') => {
+                                execute_export_preset(
+                                    ExportPreset::Today,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Char('2') => {
+                                execute_export_preset(
+                                    ExportPreset::Yesterday,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Char('3') => {
+                                execute_export_preset(
+                                    ExportPreset::Last7Days,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Char('4') => {
+                                execute_export_preset(
+                                    ExportPreset::Last30Days,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Char('5') => {
+                                execute_export_preset(
+                                    ExportPreset::SpecificDate,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Char('6') => {
+                                execute_export_preset(
+                                    ExportPreset::DateRange,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            KeyCode::Enter => {
+                                let preset = ExportPreset::ALL[*selected];
+                                execute_export_preset(
+                                    preset,
+                                    &mut export_modal,
+                                    &mut toast_message,
+                                );
+                            }
+                            _ => {}
+                        },
                         ExportModalState::InputSpecificDate { input, error: _ } => {
                             match key.code {
                                 KeyCode::Esc => {
@@ -980,42 +1071,66 @@ pub fn run_status_tui() -> Result<()> {
                                 }
                                 KeyCode::Backspace => {
                                     input.pop();
-                                    export_modal = Some(ExportModalState::InputSpecificDate { input: input.clone(), error: None });
+                                    export_modal = Some(ExportModalState::InputSpecificDate {
+                                        input: input.clone(),
+                                        error: None,
+                                    });
                                 }
-                                KeyCode::Char(c) if (c.is_ascii_digit() || c == '-') && input.len() < 10 => {
+                                KeyCode::Char(c)
+                                    if (c.is_ascii_digit() || c == '-') && input.len() < 10 =>
+                                {
                                     input.push(c);
-                                    export_modal = Some(ExportModalState::InputSpecificDate { input: input.clone(), error: None });
+                                    export_modal = Some(ExportModalState::InputSpecificDate {
+                                        input: input.clone(),
+                                        error: None,
+                                    });
                                 }
                                 KeyCode::Enter => {
-                                    if chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d").is_ok() {
+                                    if chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d").is_ok()
+                                    {
                                         match LogWriter::read_events_for_date(input) {
                                             Ok(events) => {
                                                 let report = generate_ai_report(&events, input);
                                                 if copy_to_clipboard(&report).is_ok() {
                                                     toast_message = Some((format!("✔ AI payload for {} copied to clipboard!", input), Instant::now()));
                                                 } else {
-                                                    toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                                                    toast_message = Some((
+                                                        "❌ Failed to run wl-copy".to_string(),
+                                                        Instant::now(),
+                                                    ));
                                                 }
                                                 export_modal = None;
                                             }
                                             Err(e) => {
-                                                export_modal = Some(ExportModalState::InputSpecificDate {
-                                                    input: input.clone(),
-                                                    error: Some(format!("Error reading logs: {}", e)),
-                                                });
+                                                export_modal =
+                                                    Some(ExportModalState::InputSpecificDate {
+                                                        input: input.clone(),
+                                                        error: Some(format!(
+                                                            "Error reading logs: {}",
+                                                            e
+                                                        )),
+                                                    });
                                             }
                                         }
                                     } else {
                                         export_modal = Some(ExportModalState::InputSpecificDate {
                                             input: input.clone(),
-                                            error: Some("Invalid format! Use YYYY-MM-DD (e.g. 2026-08-18)".to_string()),
+                                            error: Some(
+                                                "Invalid format! Use YYYY-MM-DD (e.g. 2026-08-18)"
+                                                    .to_string(),
+                                            ),
                                         });
                                     }
                                 }
                                 _ => {}
                             }
                         }
-                        ExportModalState::InputDateRange { start_input, end_input, editing_end, error: _ } => {
+                        ExportModalState::InputDateRange {
+                            start_input,
+                            end_input,
+                            editing_end,
+                            error: _,
+                        } => {
                             match key.code {
                                 KeyCode::Esc => {
                                     export_modal = Some(ExportModalState::Menu { selected: 5 });
@@ -1044,7 +1159,9 @@ pub fn run_status_tui() -> Result<()> {
                                 }
                                 KeyCode::Char(c) if (c.is_ascii_digit() || c == '-') => {
                                     if *editing_end {
-                                        if end_input.len() < 10 { end_input.push(c); }
+                                        if end_input.len() < 10 {
+                                            end_input.push(c);
+                                        }
                                     } else if start_input.len() < 10 {
                                         start_input.push(c);
                                     }
@@ -1064,8 +1181,13 @@ pub fn run_status_tui() -> Result<()> {
                                             error: None,
                                         });
                                     } else {
-                                        let s_res = chrono::NaiveDate::parse_from_str(start_input, "%Y-%m-%d");
-                                        let e_res = chrono::NaiveDate::parse_from_str(end_input, "%Y-%m-%d");
+                                        let s_res = chrono::NaiveDate::parse_from_str(
+                                            start_input,
+                                            "%Y-%m-%d",
+                                        );
+                                        let e_res = chrono::NaiveDate::parse_from_str(
+                                            end_input, "%Y-%m-%d",
+                                        );
                                         match (s_res, e_res) {
                                             (Ok(s_date), Ok(e_date)) => {
                                                 if s_date > e_date {
@@ -1076,24 +1198,41 @@ pub fn run_status_tui() -> Result<()> {
                                                         error: Some("Start date cannot be after end date!".to_string()),
                                                     });
                                                 } else {
-                                                    match LogWriter::read_events_for_date_range(start_input, end_input) {
+                                                    match LogWriter::read_events_for_date_range(
+                                                        start_input,
+                                                        end_input,
+                                                    ) {
                                                         Ok(events) => {
-                                                            let title = format!("{} to {}", start_input, end_input);
-                                                            let report = generate_ai_report(&events, &title);
+                                                            let title = format!(
+                                                                "{} to {}",
+                                                                start_input, end_input
+                                                            );
+                                                            let report =
+                                                                generate_ai_report(&events, &title);
                                                             if copy_to_clipboard(&report).is_ok() {
                                                                 toast_message = Some((format!("✔ AI payload for {} copied to clipboard!", title), Instant::now()));
                                                             } else {
-                                                                toast_message = Some(("❌ Failed to run wl-copy".to_string(), Instant::now()));
+                                                                toast_message = Some((
+                                                                    "❌ Failed to run wl-copy"
+                                                                        .to_string(),
+                                                                    Instant::now(),
+                                                                ));
                                                             }
                                                             export_modal = None;
                                                         }
                                                         Err(e) => {
-                                                            export_modal = Some(ExportModalState::InputDateRange {
-                                                                start_input: start_input.clone(),
-                                                                end_input: end_input.clone(),
-                                                                editing_end: *editing_end,
-                                                                error: Some(format!("Error reading logs: {}", e)),
-                                                            });
+                                                            export_modal = Some(
+                                                                ExportModalState::InputDateRange {
+                                                                    start_input: start_input
+                                                                        .clone(),
+                                                                    end_input: end_input.clone(),
+                                                                    editing_end: *editing_end,
+                                                                    error: Some(format!(
+                                                                        "Error reading logs: {}",
+                                                                        e
+                                                                    )),
+                                                                },
+                                                            );
                                                         }
                                                     }
                                                 }
@@ -1174,15 +1313,21 @@ pub fn run_status_tui() -> Result<()> {
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         if visible_count > 0 {
-                            let next = if current_sel + 1 >= visible_count { 0 } else { current_sel + 1 };
+                            let next = if current_sel + 1 >= visible_count {
+                                0
+                            } else {
+                                current_sel + 1
+                            };
                             list_state.select(Some(next));
                         }
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if visible_count > 0 {
-                            let prev = if current_sel == 0 { visible_count - 1 } else { current_sel - 1 };
-                            list_state.select(Some(prev));
-                        }
+                    KeyCode::Up | KeyCode::Char('k') if visible_count > 0 => {
+                        let prev = if current_sel == 0 {
+                            visible_count - 1
+                        } else {
+                            current_sel - 1
+                        };
+                        list_state.select(Some(prev));
                     }
                     _ => {}
                 }
@@ -1201,19 +1346,22 @@ fn kill_app_processes(sys: &mut System, target: &AppDetail) -> usize {
     sys.refresh_processes_specifics(sysinfo::ProcessRefreshKind::everything());
     let mut killed = 0;
 
-    for (_pid, p) in sys.processes() {
+    for p in sys.processes().values() {
         let clean_name = p
             .exe()
             .and_then(|e| e.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| p.name().to_string());
 
-        let raw_exe_path = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+        let raw_exe_path = p
+            .exe()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-        if clean_name == target.name || (!target.exe_path.is_empty() && raw_exe_path == target.exe_path) {
-            if p.kill() {
-                killed += 1;
-            }
+        let matches_name = clean_name == target.name;
+        let matches_path = !target.exe_path.is_empty() && raw_exe_path == target.exe_path;
+        if (matches_name || matches_path) && p.kill() {
+            killed += 1;
         }
     }
 
@@ -1221,9 +1369,7 @@ fn kill_app_processes(sys: &mut System, target: &AppDetail) -> usize {
 }
 
 fn copy_to_clipboard(text: &str) -> Result<()> {
-    let mut child = Command::new("wl-copy")
-        .stdin(Stdio::piped())
-        .spawn()?;
+    let mut child = Command::new("wl-copy").stdin(Stdio::piped()).spawn()?;
 
     if let Some(mut stdin) = child.stdin.take() {
         use std::io::Write;

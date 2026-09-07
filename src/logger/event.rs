@@ -35,16 +35,26 @@ pub enum ActivityEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_secs: Option<u64>,
     },
+    MediaWatchThreshold {
+        timestamp: String,
+        player: String,
+        title: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        duration_secs: u64,
+        watched_secs: u64,
+        watch_pct: f32,
+    },
 }
 
 impl ActivityEvent {
-    #[allow(dead_code)]
     pub fn timestamp(&self) -> &str {
         match self {
             ActivityEvent::WindowFocus { timestamp, .. } => timestamp,
             ActivityEvent::PowerState { timestamp, .. } => timestamp,
             ActivityEvent::SystemMetrics { timestamp, .. } => timestamp,
             ActivityEvent::MediaPlayback { timestamp, .. } => timestamp,
+            ActivityEvent::MediaWatchThreshold { timestamp, .. } => timestamp,
         }
     }
 }

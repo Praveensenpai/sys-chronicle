@@ -86,7 +86,10 @@ impl LogWriter {
         Ok(all_events)
     }
 
-    pub fn read_events_for_date_range(start_date: &str, end_date: &str) -> Result<Vec<ActivityEvent>> {
+    pub fn read_events_for_date_range(
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<ActivityEvent>> {
         let start = chrono::NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
             .with_context(|| format!("Invalid start date format: '{}'", start_date))?;
         let end = chrono::NaiveDate::parse_from_str(end_date, "%Y-%m-%d")

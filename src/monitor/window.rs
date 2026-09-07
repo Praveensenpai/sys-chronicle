@@ -69,7 +69,10 @@ impl WindowMonitor {
                 env::set_var("HYPRLAND_INSTANCE_SIGNATURE", &sig);
 
                 if let Ok(stream) = UnixStream::connect(&path).await {
-                    println!("[WindowMonitor] Listening to Hyprland IPC socket: {:?}", path);
+                    println!(
+                        "[WindowMonitor] Listening to Hyprland IPC socket: {:?}",
+                        path
+                    );
                     let reader = BufReader::new(stream);
                     let mut lines = reader.lines();
 
@@ -84,8 +87,7 @@ impl WindowMonitor {
                             line = lines.next_line() => {
                                 match line {
                                     Ok(Some(msg)) => {
-                                        if msg.starts_with("activewindow>>") {
-                                            let payload = &msg["activewindow>>".len()..];
+                                        if let Some(payload) = msg.strip_prefix("activewindow>>") {
                                             let parts: Vec<&str> = payload.splitn(2, ',').collect();
                                             let app_class = parts.first().unwrap_or(&"").to_string();
                                             let title = parts.get(1).unwrap_or(&"").to_string();
@@ -119,7 +121,9 @@ impl WindowMonitor {
                     }
 
                     if ipc_error {
-                        eprintln!("[WindowMonitor] Hyprland IPC connection closed. Will retry/poll.");
+                        eprintln!(
+                            "[WindowMonitor] Hyprland IPC connection closed. Will retry/poll."
+                        );
                     }
                 }
             }
@@ -199,7 +203,11 @@ impl WindowMonitor {
 
     pub fn find_hyprland_socket_and_sig() -> Option<(String, PathBuf)> {
         let xdg_runtime = env::var("XDG_RUNTIME_DIR")
-            .or_else(|_| dirs::runtime_dir().map(|p| p.to_string_lossy().to_string()).ok_or(env::VarError::NotPresent))
+            .or_else(|_| {
+                dirs::runtime_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .ok_or(env::VarError::NotPresent)
+            })
             .ok()?;
 
         // 1. Try env var first

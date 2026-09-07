@@ -93,7 +93,10 @@ impl MetricsMonitor {
                 }
                 seen_tgids.insert(proc_tgid);
 
-                let raw_exe_path = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+                let raw_exe_path = p
+                    .exe()
+                    .map(|e| e.to_string_lossy().to_string())
+                    .unwrap_or_default();
 
                 let exe_name = if let Some(exe) = p.exe() {
                     if let Some(file_name) = exe.file_name() {
@@ -153,7 +156,11 @@ impl MetricsMonitor {
                 };
                 AppDetail {
                     name: name.clone(),
-                    exe_path: if acc.exe_path.is_empty() { name.clone() } else { acc.exe_path.clone() },
+                    exe_path: if acc.exe_path.is_empty() {
+                        name.clone()
+                    } else {
+                        acc.exe_path.clone()
+                    },
                     process_count: acc.process_count,
                     ram_mb: acc.ram_mb,
                     ram_pct: app_ram_pct,
@@ -206,7 +213,9 @@ impl MetricsMonitor {
                 let label = Self::read_text(path.join(format!("temp{index}_label")))
                     .unwrap_or_else(|| format!("{device_name} temp"));
                 let is_cpu_label = Self::is_cpu_sensor_label(&label);
-                if let Some(millidegrees) = Self::read_number(path.join(format!("temp{index}_input"))) {
+                if let Some(millidegrees) =
+                    Self::read_number(path.join(format!("temp{index}_input")))
+                {
                     let reading = (millidegrees as f32 / 1000.0, label);
                     if source_is_cpu || is_cpu_label {
                         cpu_temperatures.push(reading);
@@ -253,7 +262,10 @@ impl MetricsMonitor {
     }
 
     fn read_text(path: impl AsRef<Path>) -> Option<String> {
-        fs::read_to_string(path).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+        fs::read_to_string(path)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
     }
 
     fn read_number(path: impl AsRef<Path>) -> Option<u32> {

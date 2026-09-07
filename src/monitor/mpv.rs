@@ -46,12 +46,9 @@ impl MpvMonitor {
     }
 
     fn find_active_socket() -> Option<PathBuf> {
-        for path in Self::candidate_sockets() {
-            if path.exists() {
-                return Some(path);
-            }
-        }
-        None
+        Self::candidate_sockets()
+            .into_iter()
+            .find(|path| path.exists())
     }
 
     pub async fn run(&mut self, running: Arc<AtomicBool>) -> Result<()> {
@@ -96,6 +93,7 @@ impl MpvMonitor {
         let mut current_duration: Option<u64> = None;
         let mut last_pos_update = Local::now();
         let mut session_started = false;
+        let mut tracker = super::UniqueTimelineTracker::new();
 
         while running.load(Ordering::SeqCst) {
             tokio::select! {
@@ -110,6 +108,7 @@ impl MpvMonitor {
                                                 let new_title = val.trim().to_string();
                                                 if !new_title.is_empty() && new_title != current_title {
                                                     current_title = new_title;
+                                                    tracker.set_media(&current_title, current_duration);
                                                     self.log_media_event("start", &current_title, current_path.as_deref(), current_pos, current_duration);
                                                     session_started = true;
                                                 }
@@ -124,6 +123,7 @@ impl MpvMonitor {
                                                         .map(|n| n.to_string_lossy().to_string())
                                                         .unwrap_or_else(|| val.to_string());
                                                     current_title = file_name;
+                                                    tracker.set_media(&current_title, current_duration);
                                                     self.log_media_event("start", &current_title, current_path.as_deref(), current_pos, current_duration);
                                                     session_started = true;
                                                 }
@@ -154,13 +154,26 @@ impl MpvMonitor {
                                                     }
                                                 }
 
+                                                tracker.record_position(new_pos, current_pause);
+                                                if let Some((dur, watched, pct)) = tracker.check_threshold(80.0) {
+                                                    self.log_threshold_event(
+                                                        &current_title,
+                                                        current_path.as_deref(),
+                                                        dur,
+                                                        watched,
+                                                        pct,
+                                                    );
+                                                }
+
                                                 current_pos = new_pos;
                                                 last_pos_update = now;
                                             }
                                         }
                                         Some(5) => { // duration
                                             if let Some(dur_num) = msg.data.as_ref().and_then(|v| v.as_f64()) {
-                                                current_duration = Some(dur_num.max(0.0) as u64);
+                                                let dur = dur_num.max(0.0) as u64;
+                                                current_duration = Some(dur);
+                                                tracker.set_duration(dur);
                                             }
                                         }
                                         _ => {}
@@ -176,7 +189,13 @@ impl MpvMonitor {
         }
 
         if session_started && !current_title.is_empty() {
-            self.log_media_event("stop", &current_title, current_path.as_deref(), current_pos, current_duration);
+            self.log_media_event(
+                "stop",
+                &current_title,
+                current_path.as_deref(),
+                current_pos,
+                current_duration,
+            );
         }
 
         Ok(())
@@ -208,5 +227,34 @@ impl MpvMonitor {
         };
 
         let _ = self.writer.write_event(&event);
+    }
+
+    fn log_threshold_event(
+        &self,
+        title: &str,
+        path: Option<&str>,
+        duration_secs: u64,
+        watched_secs: u64,
+        watch_pct: f32,
+    ) {
+        if title.is_empty() {
+            return;
+        }
+
+        let now = Local::now();
+        let timestamp_str = now.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string();
+
+        let event = ActivityEvent::MediaWatchThreshold {
+            timestamp: timestamp_str,
+            player: "mpv".to_string(),
+            title: title.to_string(),
+            path: path.map(|p| p.to_string()),
+            duration_secs,
+            watched_secs,
+            watch_pct,
+        };
+
+        let _ = self.writer.write_event(&event);
+        crate::plugin::PluginDispatcher::dispatch_event(&event);
     }
 }
