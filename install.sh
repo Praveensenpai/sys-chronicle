@@ -15,6 +15,9 @@ if [ -f "Cargo.toml" ]; then
     systemctl --user stop "$BINARY.service" 2>/dev/null || true
     rm -f "$INSTALL_DIR/$BINARY"
     cp target/release/"$BINARY" "$INSTALL_DIR/$BINARY"
+    cp target/release/sys-chronicle-mal "$INSTALL_DIR/sys-chronicle-mal"
+    mkdir -p "$HOME/.config/sys-chronicle/plugins"
+    ln -sf "$INSTALL_DIR/sys-chronicle-mal" "$HOME/.config/sys-chronicle/plugins/sys-chronicle-mal"
 else
     echo "[+] Downloading latest release binary from GitHub..."
     LATEST_TAG=$(curl -4 -fL -sS -H "Cache-Control: no-cache" "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
@@ -31,11 +34,18 @@ else
     systemctl --user stop "$BINARY.service" 2>/dev/null || true
     rm -f "$INSTALL_DIR/$BINARY"
     mv "$TMP_DIR/$BINARY" "$INSTALL_DIR/$BINARY"
+    if [ -f "$TMP_DIR/sys-chronicle-mal" ]; then
+        mv "$TMP_DIR/sys-chronicle-mal" "$INSTALL_DIR/sys-chronicle-mal"
+        mkdir -p "$HOME/.config/sys-chronicle/plugins"
+        ln -sf "$INSTALL_DIR/sys-chronicle-mal" "$HOME/.config/sys-chronicle/plugins/sys-chronicle-mal"
+    fi
     rm -rf "$TMP_DIR"
 fi
 
 chmod +x "$INSTALL_DIR/$BINARY"
+[ -f "$INSTALL_DIR/sys-chronicle-mal" ] && chmod +x "$INSTALL_DIR/sys-chronicle-mal"
 echo "✔ Installed $BINARY to $INSTALL_DIR/$BINARY"
+[ -f "$INSTALL_DIR/sys-chronicle-mal" ] && echo "✔ Installed sys-chronicle-mal to $INSTALL_DIR/sys-chronicle-mal (plugin linked)"
 
 echo "[+] Configuring & enabling systemd user service..."
 "$INSTALL_DIR/$BINARY" install-service

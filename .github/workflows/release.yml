@@ -37,8 +37,9 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/sys-chronicle dist/
+          cp target/release/sys-chronicle-mal dist/
           cd dist
-          tar -czvf sys-chronicle-linux-x86_64.tar.gz sys-chronicle
+          tar -czvf sys-chronicle-linux-x86_64.tar.gz sys-chronicle sys-chronicle-mal
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

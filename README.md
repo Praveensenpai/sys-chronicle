@@ -95,6 +95,46 @@ sys-chronicle install-service
 
 ---
 
+## 🔌 Event-Driven Plugin System
+
+`sys-chronicle` features an asynchronous, non-blocking plugin hook engine. Any executable file placed inside `~/.config/sys-chronicle/plugins/` will automatically receive system activity events formatted as JSON over `stdin`.
+
+### Accurate 80% Watch Threshold Detection
+Unlike naive scrobblers that merely check `time-pos / duration >= 0.8` (which falsely triggers if you scrub to the end of a video) or count wall-clock seconds (which inflates if you replay a 2-minute scene 10 times), `sys-chronicle` uses **Unique Timeline Coverage**:
+- Continuously merges disjoint playback intervals `[start..end]`.
+- Calculates `unique_watched_seconds / video_duration >= 0.80`.
+- Once 80% real coverage is reached, emits a single `media_watch_threshold` event and triggers your plugins without spamming.
+
+---
+
+## 🎬 MyAnimeList Companion Scrobbler (`sys-chronicle-mal`)
+
+`sys-chronicle-mal` is an official companion binary that syncs watched anime to MyAnimeList when reaching the real 80% watch threshold in MPV.
+
+### Features
+- 🔑 **Official MAL API v2 with PKCE OAuth2**: Secure interactive browser login with zero secret leaking.
+- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash Lite (`gemini-3.5-flash-lite`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
+- 🔔 **Desktop Notifications**: Sends desktop alerts via `notify-send` when an episode is updated.
+
+### Setup & Usage
+
+```bash
+# 1. Connect your MyAnimeList account (and optionally provide Gemini API Key)
+sys-chronicle-mal login
+
+# 2. Check connection health and profile status
+sys-chronicle-mal status
+
+# 3. Test anime parsing on any video filename
+sys-chronicle-mal test "[SubsPlease] Sousou no Frieren - 04 (1080p) [9A1B2C3D].mkv"
+
+# 4. Link as an active plugin for sys-chronicle (handled automatically by install.sh)
+mkdir -p ~/.config/sys-chronicle/plugins
+ln -sf ~/.local/bin/sys-chronicle-mal ~/.config/sys-chronicle/plugins/sys-chronicle-mal
+```
+
+---
+
 ## 🤖 Example Prompt for AI Analysis
 
 Run the export shortcut:
