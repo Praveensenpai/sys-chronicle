@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlaybackInterval {
     pub start: u64,
     pub end: u64,
@@ -16,6 +18,15 @@ pub struct UniqueTimelineTracker {
 impl UniqueTimelineTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn intervals(&self) -> &[PlaybackInterval] {
+        &self.intervals
+    }
+
+    pub fn load_intervals(&mut self, intervals: &[PlaybackInterval]) {
+        self.intervals = intervals.to_vec();
+        self.merge_intervals();
     }
 
     pub fn set_media(&mut self, media_key: &str, duration: Option<u64>) {
@@ -195,5 +206,51 @@ mod tests {
 
         assert_eq!(tracker.total_unique_secs(), 10);
         assert_eq!(tracker.coverage_pct(), 10.0);
+    }
+
+    #[test]
+    fn test_seek_backward_preserves_unique_watch_duration() {
+        let mut tracker = UniqueTimelineTracker::new();
+        tracker.set_media("anime_ep1.mkv", Some(100));
+
+        // Watch 0s to 15s
+        for pos in 0..=15 {
+            tracker.record_position(pos, false);
+        }
+        assert_eq!(tracker.total_unique_secs(), 15);
+
+        // Seek back to 1s
+        tracker.record_position(1, false);
+        assert_eq!(tracker.total_unique_secs(), 15);
+
+        // Rewatch 1s to 10s (already watched segment)
+        for pos in 1..=10 {
+            tracker.record_position(pos, false);
+        }
+        assert_eq!(tracker.total_unique_secs(), 15);
+
+        // Watch new segment from 15s to 25s
+        tracker.record_position(15, false);
+        for pos in 16..=25 {
+            tracker.record_position(pos, false);
+        }
+        assert_eq!(tracker.total_unique_secs(), 25);
+    }
+
+    #[test]
+    fn test_load_intervals_restores_coverage() {
+        let mut tracker = UniqueTimelineTracker::new();
+        tracker.set_media("anime_ep1.mkv", Some(100));
+
+        let saved = vec![PlaybackInterval { start: 0, end: 15 }];
+        tracker.load_intervals(&saved);
+        assert_eq!(tracker.total_unique_secs(), 15);
+
+        // Continue watching from 15 to 20
+        tracker.record_position(15, false);
+        for pos in 16..=20 {
+            tracker.record_position(pos, false);
+        }
+        assert_eq!(tracker.total_unique_secs(), 20);
     }
 }

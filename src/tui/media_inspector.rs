@@ -9,6 +9,17 @@ use ratatui::{
 use super::media_tab::MediaTabState;
 use crate::mal::SyncStatus;
 
+fn format_time(secs: u64) -> String {
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    let s = secs % 60;
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, mins, s)
+    } else {
+        format!("{:02}:{:02}", mins, s)
+    }
+}
+
 pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) {
     let block = Block::default()
         .title(" 🔍 Anime & MAL Inspector ")
@@ -26,8 +37,9 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
         .constraints([
             Constraint::Length(7),
             Constraint::Length(3),
-            Constraint::Min(4),
             Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(2),
         ])
         .margin(1)
         .split(area);
@@ -61,11 +73,24 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
             ),
         ]),
         Line::from(vec![
-            Span::styled("Coverage:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Position:  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 format!(
-                    "{}s / {}s ({:.1}%)",
-                    r.watched_secs, r.duration_secs, r.watch_pct
+                    "{} / {} (Seek Head)",
+                    format_time(r.position_secs.unwrap_or(0)),
+                    format_time(r.duration_secs)
+                ),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Watched:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(
+                    "{} / {} ({:.1}% Anti-Cheat)",
+                    format_time(r.watched_secs),
+                    format_time(r.duration_secs),
+                    r.watch_pct
                 ),
                 Style::default().fg(Color::Green),
             ),
@@ -88,12 +113,51 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
     ];
     f.render_widget(Paragraph::new(details), inner[0]);
 
-    let gauge = Gauge::default()
+    let pos_secs = r.position_secs.unwrap_or(0);
+    let pos_pct = if r.duration_secs > 0 {
+        (pos_secs as f32 / r.duration_secs as f32 * 100.0).min(100.0) as u16
+    } else {
+        0
+    };
+    let pos_label = format!(
+        "{} / {} (Seek Head: {}%)",
+        format_time(pos_secs),
+        format_time(r.duration_secs),
+        pos_pct
+    );
+    let pos_gauge = Gauge::default()
         .block(
             Block::default()
-                .title(" Timeline Watch Progress (80% needed) ")
+                .title(" ⏱️ Current Playback Position (Seek Head) ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .gauge_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .bg(Color::Rgb(30, 30, 30)),
+        )
+        .label(pos_label)
+        .percent(pos_pct);
+    f.render_widget(pos_gauge, inner[1]);
+
+    let watched_pct = r.watch_pct.clamp(0.0, 100.0) as u16;
+    let watched_label = format!(
+        "{} / {} (Actual Watched: {:.1}%)",
+        format_time(r.watched_secs),
+        format_time(r.duration_secs),
+        r.watch_pct
+    );
+    let watched_gauge = Gauge::default()
+        .block(
+            Block::default()
+                .title(" 🛡️ Actual Watched Duration (Anti-Cheat: 80% needed) ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(if r.watch_pct >= 80.0 {
+                    Color::Green
+                } else {
+                    Color::Cyan
+                })),
         )
         .gauge_style(
             Style::default()
@@ -104,8 +168,9 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
                 })
                 .bg(Color::Rgb(30, 30, 30)),
         )
-        .percent(r.watch_pct.clamp(0.0, 100.0) as u16);
-    f.render_widget(gauge, inner[1]);
+        .label(watched_label)
+        .percent(watched_pct);
+    f.render_widget(watched_gauge, inner[2]);
 
     let sync_explanation = match &r.status {
         SyncStatus::AheadOnMal { mal_episode } => vec![
@@ -201,7 +266,7 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
         Paragraph::new(sync_explanation)
             .block(exp_block)
             .wrap(Wrap { trim: true }),
-        inner[2],
+        inner[3],
     );
 
     let status_text = if let Some((msg, _)) = &state.status_message {
@@ -217,7 +282,7 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
             Style::default().fg(Color::DarkGray),
         ))
     };
-    f.render_widget(Paragraph::new(status_text), inner[3]);
+    f.render_widget(Paragraph::new(status_text), inner[4]);
 }
 
 pub fn render_force_sync_modal(f: &mut Frame, area: Rect, state: &MediaTabState) {

@@ -58,13 +58,17 @@ impl MalHandler {
                 if duration > 0 {
                     let raw_media = path.as_deref().unwrap_or(&title).to_string();
                     if let Some(info) = AnimeParser::parse(&raw_media) {
-                        let _ = AnimeSyncHistory::update_progress(
-                            &raw_media,
-                            &info.title,
-                            info.episode,
-                            path,
-                            duration,
-                            position_secs,
+                        let _ = AnimeSyncHistory::update_progress_full(
+                            crate::mal::history::ProgressUpdateParams {
+                                raw_title: &raw_media,
+                                canonical_title: &info.title,
+                                episode: info.episode,
+                                path,
+                                duration_secs: duration,
+                                watched_secs: 0,
+                                position_secs: Some(position_secs),
+                                intervals: &[],
+                            },
                         );
                     }
                 }
@@ -167,6 +171,13 @@ impl MalHandler {
             SyncStatus::Synced
         };
 
+        let existing = AnimeSyncHistory::find_record(raw_media, &anime.title, info.episode);
+        let intervals = existing
+            .as_ref()
+            .map(|e| e.intervals.clone())
+            .unwrap_or_default();
+        let position_secs = existing.and_then(|e| e.position_secs);
+
         let record = AnimeSyncRecord {
             raw_title: raw_media.to_string(),
             canonical_title: anime.title,
@@ -174,6 +185,7 @@ impl MalHandler {
             path: Some(raw_media.to_string()),
             duration_secs,
             watched_secs,
+            position_secs,
             watch_pct,
             mal_anime_id: Some(anime.id),
             mal_current_ep: Some(current_watched.max(info.episode)),
@@ -184,6 +196,7 @@ impl MalHandler {
             },
             status,
             last_updated: now,
+            intervals,
         };
 
         let _ = AnimeSyncHistory::upsert(record.clone());

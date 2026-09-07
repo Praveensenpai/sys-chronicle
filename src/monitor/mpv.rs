@@ -22,6 +22,15 @@ struct MpvEvent {
     data: Option<serde_json::Value>,
 }
 
+struct MpvProgressParams<'a> {
+    title: &'a str,
+    path: Option<&'a str>,
+    duration_secs: Option<u64>,
+    watched_secs: u64,
+    position_secs: u64,
+    intervals: &'a [crate::monitor::PlaybackInterval],
+}
+
 impl MpvMonitor {
     pub fn new(writer: LogWriter) -> Self {
         Self { writer }
@@ -92,6 +101,7 @@ impl MpvMonitor {
         let mut current_pos = 0u64;
         let mut current_duration: Option<u64> = None;
         let mut last_pos_update = Local::now();
+        let mut last_history_sync = std::time::Instant::now();
         let mut session_started = false;
         let mut tracker = super::UniqueTimelineTracker::new();
 
@@ -109,7 +119,23 @@ impl MpvMonitor {
                                                 if !new_title.is_empty() && new_title != current_title {
                                                     current_title = new_title;
                                                     tracker.set_media(&current_title, current_duration);
+                                                    let raw = current_path.as_deref().unwrap_or(&current_title);
+                                                    if let Some(info) = crate::mal::AnimeParser::parse(raw) {
+                                                        if let Some(existing) = crate::mal::AnimeSyncHistory::find_record(raw, &info.title, info.episode) {
+                                                            if !existing.intervals.is_empty() {
+                                                                tracker.load_intervals(&existing.intervals);
+                                                            }
+                                                        }
+                                                    }
                                                     self.log_media_event("start", &current_title, current_path.as_deref(), current_pos, current_duration);
+                                                    Self::sync_history_progress(MpvProgressParams {
+                                                        title: &current_title,
+                                                        path: current_path.as_deref(),
+                                                        duration_secs: current_duration,
+                                                        watched_secs: tracker.total_unique_secs(),
+                                                        position_secs: current_pos,
+                                                        intervals: tracker.intervals(),
+                                                    });
                                                     session_started = true;
                                                 }
                                             }
@@ -124,7 +150,23 @@ impl MpvMonitor {
                                                         .unwrap_or_else(|| val.to_string());
                                                     current_title = file_name;
                                                     tracker.set_media(&current_title, current_duration);
+                                                    let raw = current_path.as_deref().unwrap_or(&current_title);
+                                                    if let Some(info) = crate::mal::AnimeParser::parse(raw) {
+                                                        if let Some(existing) = crate::mal::AnimeSyncHistory::find_record(raw, &info.title, info.episode) {
+                                                            if !existing.intervals.is_empty() {
+                                                                tracker.load_intervals(&existing.intervals);
+                                                            }
+                                                        }
+                                                    }
                                                     self.log_media_event("start", &current_title, current_path.as_deref(), current_pos, current_duration);
+                                                    Self::sync_history_progress(MpvProgressParams {
+                                                        title: &current_title,
+                                                        path: current_path.as_deref(),
+                                                        duration_secs: current_duration,
+                                                        watched_secs: tracker.total_unique_secs(),
+                                                        position_secs: current_pos,
+                                                        intervals: tracker.intervals(),
+                                                    });
                                                     session_started = true;
                                                 }
                                             }
@@ -135,6 +177,14 @@ impl MpvMonitor {
                                                     current_pause = paused;
                                                     let action = if paused { "pause" } else { "resume" };
                                                     self.log_media_event(action, &current_title, current_path.as_deref(), current_pos, current_duration);
+                                                    Self::sync_history_progress(MpvProgressParams {
+                                                        title: &current_title,
+                                                        path: current_path.as_deref(),
+                                                        duration_secs: current_duration,
+                                                        watched_secs: tracker.total_unique_secs(),
+                                                        position_secs: current_pos,
+                                                        intervals: tracker.intervals(),
+                                                    });
                                                 }
                                             }
                                         }
@@ -165,6 +215,18 @@ impl MpvMonitor {
                                                     );
                                                 }
 
+                                                if last_history_sync.elapsed() >= std::time::Duration::from_secs(3) {
+                                                    Self::sync_history_progress(MpvProgressParams {
+                                                        title: &current_title,
+                                                        path: current_path.as_deref(),
+                                                        duration_secs: current_duration,
+                                                        watched_secs: tracker.total_unique_secs(),
+                                                        position_secs: new_pos,
+                                                        intervals: tracker.intervals(),
+                                                    });
+                                                    last_history_sync = std::time::Instant::now();
+                                                }
+
                                                 current_pos = new_pos;
                                                 last_pos_update = now;
                                             }
@@ -174,6 +236,14 @@ impl MpvMonitor {
                                                 let dur = dur_num.max(0.0) as u64;
                                                 current_duration = Some(dur);
                                                 tracker.set_duration(dur);
+                                                Self::sync_history_progress(MpvProgressParams {
+                                                    title: &current_title,
+                                                    path: current_path.as_deref(),
+                                                    duration_secs: current_duration,
+                                                    watched_secs: tracker.total_unique_secs(),
+                                                    position_secs: current_pos,
+                                                    intervals: tracker.intervals(),
+                                                });
                                             }
                                         }
                                         _ => {}
@@ -196,6 +266,14 @@ impl MpvMonitor {
                 current_pos,
                 current_duration,
             );
+            Self::sync_history_progress(MpvProgressParams {
+                title: &current_title,
+                path: current_path.as_deref(),
+                duration_secs: current_duration,
+                watched_secs: tracker.total_unique_secs(),
+                position_secs: current_pos,
+                intervals: tracker.intervals(),
+            });
         }
 
         Ok(())
@@ -227,6 +305,28 @@ impl MpvMonitor {
         };
 
         let _ = self.writer.write_event(&event);
+        crate::plugin::PluginDispatcher::dispatch_event(&event);
+    }
+
+    fn sync_history_progress(params: MpvProgressParams<'_>) {
+        let raw = params.path.unwrap_or(params.title);
+        if let Some(info) = crate::mal::AnimeParser::parse(raw) {
+            let duration = params.duration_secs.unwrap_or(0);
+            if duration > 0 {
+                let _ = crate::mal::AnimeSyncHistory::update_progress_full(
+                    crate::mal::history::ProgressUpdateParams {
+                        raw_title: raw,
+                        canonical_title: &info.title,
+                        episode: info.episode,
+                        path: params.path.map(|s| s.to_string()),
+                        duration_secs: duration,
+                        watched_secs: params.watched_secs,
+                        position_secs: Some(params.position_secs),
+                        intervals: params.intervals,
+                    },
+                );
+            }
+        }
     }
 
     fn log_threshold_event(
@@ -256,5 +356,36 @@ impl MpvMonitor {
 
         let _ = self.writer.write_event(&event);
         crate::plugin::PluginDispatcher::dispatch_event(&event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_history_progress_creates_record() {
+        let title = "Saijo no Osewa - 10.mkv";
+        let path = Some("/home/paisen/Videos/Anime/Saijo no Osewa - 10.mkv");
+        let intervals = vec![crate::monitor::PlaybackInterval { start: 0, end: 6 }];
+        MpvMonitor::sync_history_progress(MpvProgressParams {
+            title,
+            path,
+            duration_secs: Some(1480),
+            watched_secs: 6,
+            position_secs: 6,
+            intervals: &intervals,
+        });
+        let records = crate::mal::AnimeSyncHistory::load_all().expect("records loaded");
+        let saijo = records
+            .iter()
+            .find(|r| r.canonical_title == "Saijo no Osewa")
+            .expect("record found");
+        assert_eq!(saijo.episode, 10);
+        assert_eq!(saijo.duration_secs, 1480);
+        assert_eq!(saijo.watched_secs, 6);
+        assert_eq!(saijo.position_secs, Some(6));
+        assert_eq!(saijo.intervals.len(), 1);
+        assert_eq!(saijo.status, crate::mal::SyncStatus::Watching);
     }
 }

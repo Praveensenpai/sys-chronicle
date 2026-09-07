@@ -7,5 +7,5 @@ pub mod window;
 pub use metrics::MetricsMonitor;
 pub use mpv::MpvMonitor;
 pub use power::PowerMonitor;
-pub use timeline_tracker::UniqueTimelineTracker;
+pub use timeline_tracker::{PlaybackInterval, UniqueTimelineTracker};
 pub use window::WindowMonitor;

@@ -5,6 +5,8 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::monitor::PlaybackInterval;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SyncStatus {
     Watching,
@@ -34,12 +36,28 @@ pub struct AnimeSyncRecord {
     pub path: Option<String>,
     pub duration_secs: u64,
     pub watched_secs: u64,
+    #[serde(default)]
+    pub position_secs: Option<u64>,
     pub watch_pct: f32,
     pub mal_anime_id: Option<u64>,
     pub mal_current_ep: Option<u32>,
     pub mal_total_episodes: Option<u32>,
     pub status: SyncStatus,
     pub last_updated: String,
+    #[serde(default)]
+    pub intervals: Vec<PlaybackInterval>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProgressUpdateParams<'a> {
+    pub raw_title: &'a str,
+    pub canonical_title: &'a str,
+    pub episode: u32,
+    pub path: Option<String>,
+    pub duration_secs: u64,
+    pub watched_secs: u64,
+    pub position_secs: Option<u64>,
+    pub intervals: &'a [PlaybackInterval],
 }
 
 pub struct AnimeSyncHistory;
@@ -96,35 +114,51 @@ impl AnimeSyncHistory {
         Self::save_all(&records)
     }
 
-    pub fn update_progress(
+    pub fn find_record(
         raw_title: &str,
         canonical_title: &str,
         episode: u32,
-        path: Option<String>,
-        duration_secs: u64,
-        watched_secs: u64,
-    ) -> Result<()> {
-        let mut records = Self::load_all().unwrap_or_default();
-        let watch_pct = if duration_secs > 0 {
-            (watched_secs as f32 / duration_secs as f32 * 100.0).min(100.0)
-        } else {
-            0.0
-        };
+    ) -> Option<AnimeSyncRecord> {
+        let records = Self::load_all().ok()?;
+        records.into_iter().find(|r| {
+            (r.canonical_title.eq_ignore_ascii_case(canonical_title) && r.episode == episode)
+                || r.raw_title == raw_title
+        })
+    }
 
+    pub fn update_progress_full(params: ProgressUpdateParams<'_>) -> Result<()> {
+        let mut records = Self::load_all().unwrap_or_default();
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         if let Some(r) = records.iter_mut().find(|r| {
-            (r.canonical_title.eq_ignore_ascii_case(canonical_title) && r.episode == episode)
-                || r.raw_title == raw_title
+            (r.canonical_title
+                .eq_ignore_ascii_case(params.canonical_title)
+                && r.episode == params.episode)
+                || r.raw_title == params.raw_title
         }) {
-            r.watched_secs = watched_secs;
-            r.duration_secs = duration_secs;
-            r.watch_pct = watch_pct;
+            // Anti-cheat: watched_secs can NEVER decrease upon seek or rewatch
+            r.watched_secs = r.watched_secs.max(params.watched_secs);
+            r.duration_secs = params.duration_secs;
+            r.position_secs = params.position_secs.or(r.position_secs);
+            r.watch_pct = if params.duration_secs > 0 {
+                (r.watched_secs as f32 / params.duration_secs as f32 * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            if !params.intervals.is_empty() {
+                r.intervals = params.intervals.to_vec();
+            }
             r.last_updated = now;
-            if r.status == SyncStatus::Watching && watch_pct >= 80.0 {
+            if r.status == SyncStatus::Watching && r.watch_pct >= 80.0 {
                 r.status = SyncStatus::ThresholdMet;
             }
         } else {
+            let actual_watched = params.watched_secs;
+            let watch_pct = if params.duration_secs > 0 {
+                (actual_watched as f32 / params.duration_secs as f32 * 100.0).min(100.0)
+            } else {
+                0.0
+            };
             let status = if watch_pct >= 80.0 {
                 SyncStatus::ThresholdMet
             } else {
@@ -133,23 +167,45 @@ impl AnimeSyncHistory {
             records.insert(
                 0,
                 AnimeSyncRecord {
-                    raw_title: raw_title.to_string(),
-                    canonical_title: canonical_title.to_string(),
-                    episode,
-                    path,
-                    duration_secs,
-                    watched_secs,
+                    raw_title: params.raw_title.to_string(),
+                    canonical_title: params.canonical_title.to_string(),
+                    episode: params.episode,
+                    path: params.path,
+                    duration_secs: params.duration_secs,
+                    watched_secs: actual_watched,
+                    position_secs: params.position_secs,
                     watch_pct,
                     mal_anime_id: None,
                     mal_current_ep: None,
                     mal_total_episodes: None,
                     status,
                     last_updated: now,
+                    intervals: params.intervals.to_vec(),
                 },
             );
         }
 
         Self::save_all(&records)
+    }
+
+    pub fn update_progress(
+        raw_title: &str,
+        canonical_title: &str,
+        episode: u32,
+        path: Option<String>,
+        duration_secs: u64,
+        watched_secs: u64,
+    ) -> Result<()> {
+        Self::update_progress_full(ProgressUpdateParams {
+            raw_title,
+            canonical_title,
+            episode,
+            path,
+            duration_secs,
+            watched_secs,
+            position_secs: None,
+            intervals: &[],
+        })
     }
 }
 
@@ -179,14 +235,50 @@ mod tests {
             mal_anime_id: Some(52991),
             mal_current_ep: Some(6),
             mal_total_episodes: Some(28),
+            position_secs: Some(1200),
             status: SyncStatus::AheadOnMal { mal_episode: 6 },
             last_updated: "2026-09-07 16:40:00".into(),
+            intervals: vec![PlaybackInterval {
+                start: 0,
+                end: 1200,
+            }],
         };
 
         let json = serde_json::to_string(&record).expect("Failed to serialize");
         let parsed: AnimeSyncRecord = serde_json::from_str(&json).expect("Failed to deserialize");
         assert_eq!(parsed.canonical_title, "Sousou no Frieren");
         assert_eq!(parsed.episode, 4);
+        assert_eq!(parsed.position_secs, Some(1200));
+        assert_eq!(parsed.intervals.len(), 1);
         assert_eq!(parsed.status, SyncStatus::AheadOnMal { mal_episode: 6 });
+    }
+
+    #[test]
+    fn test_update_progress_monotonic_watched_secs() {
+        let raw = "Test Anime - 01.mkv";
+        let title = "Test Anime";
+        let ep = 1;
+
+        // First watch 15 seconds
+        AnimeSyncHistory::update_progress(raw, title, ep, None, 1000, 15).expect("updated");
+        let r1 = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
+        assert_eq!(r1.watched_secs, 15);
+
+        // User seeks back to 1 second
+        AnimeSyncHistory::update_progress_full(ProgressUpdateParams {
+            raw_title: raw,
+            canonical_title: title,
+            episode: ep,
+            path: None,
+            duration_secs: 1000,
+            watched_secs: 1,
+            position_secs: Some(1),
+            intervals: &[],
+        })
+        .expect("updated");
+        let r2 = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
+        // Watched duration MUST NOT DECREASE to 1; it must stay at 15
+        assert_eq!(r2.watched_secs, 15);
+        assert_eq!(r2.position_secs, Some(1));
     }
 }
