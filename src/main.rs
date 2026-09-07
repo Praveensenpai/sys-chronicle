@@ -1,6 +1,7 @@
 mod exporter;
 mod logger;
 mod monitor;
+pub mod plugin;
 mod service;
 mod tui;
 
@@ -74,8 +75,14 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Daemon { interval } => {
-            println!("[sys-chronicle daemon v{} starting]", env!("CARGO_PKG_VERSION"));
+            println!(
+                "[sys-chronicle daemon v{} starting]",
+                env!("CARGO_PKG_VERSION")
+            );
             println!("[+] Logging to: {:?}", LogWriter::get_logs_dir());
+            if let Ok(dir) = plugin::PluginDispatcher::ensure_plugins_dir() {
+                println!("[+] Plugins directory: {:?}", dir);
+            }
 
             let running = Arc::new(AtomicBool::new(true));
             let r_win = Arc::clone(&running);
@@ -124,7 +131,11 @@ async fn main() -> Result<()> {
                 }
 
                 if let Some(pow) = PowerMonitor::read_current_state() {
-                    let ac_str = if pow.ac_online { "Plugged" } else { "Unplugged" };
+                    let ac_str = if pow.ac_online {
+                        "Plugged"
+                    } else {
+                        "Unplugged"
+                    };
                     println!("Battery: {}% ({}, {})", pow.capacity, pow.status, ac_str);
                 } else {
                     println!("Battery: Unknown / Desktop");
