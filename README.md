@@ -38,7 +38,48 @@ Launch the dashboard anytime with:
 sys-chronicle status
 ```
 
-### Keybindings & Controls
+### 📸 Visual Showcase
+
+<div align="center">
+
+#### ⚡ Tab 1: Real-Time Live System Dashboard
+*Live CPU & RAM utilization gauges, hardware sensor telemetry (Package Temp & Fan RPM), active Wayland window focus, and interactive process inspector.*
+
+![Live Dashboard](assets/tui_live_dashboard.png)
+
+<br>
+
+#### 📊 Tab 2: Daily Accumulated Screen Time Analytics
+*Automated breakdown of active focused window time per application across the day.*
+
+![Daily Analytics](assets/tui_daily_analytics.png)
+
+<br>
+
+#### 🎬 Tab 3: Anime Chronicle & MyAnimeList Companion Inspector
+*Anti-cheat 80% unique coverage timeline gauge, seek-head vs watched progress tracking, and automated MAL synchronization status.*
+
+![Anime & MAL Sync](assets/tui_anime_mal_sync.png)
+
+</div>
+
+<details>
+<summary><b>🧠 View Gemini 3.5 Flash AI Classifier & Non-Anime Extra Detection</b></summary>
+<br>
+
+*Intelligent identification of live-action events, voice actress specials, Blu-ray extras, and audio dramas—bypassing MAL sync without polluting watch counts.*
+
+<div align="center">
+
+![Anime AI Classifier](assets/tui_anime_ai_classifier.png)
+
+</div>
+
+</details>
+
+<br>
+
+### ⌨️ Keybindings & Controls
 
 | Shortcut | Action | Description |
 | :---: | :--- | :--- |
