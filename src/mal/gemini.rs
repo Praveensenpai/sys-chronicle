@@ -70,6 +70,16 @@ struct GeminiResponse {
     candidates: Option<Vec<GeminiCandidate>>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GeminiClassification {
+    pub is_syncable_anime: bool,
+    pub title: Option<String>,
+    pub episode: Option<u32>,
+    pub season: Option<u32>,
+    pub content_type: Option<String>,
+    pub reason: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct GeminiParsedAnime {
     title: String,
@@ -86,7 +96,7 @@ impl GeminiParser {
     pub fn new(api_key: String, model_override: Option<String>) -> Result<Self> {
         let model = model_override
             .filter(|m| !m.trim().is_empty())
-            .unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
+            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
 
         let client = Client::builder()
             .timeout(Duration::from_secs(6))
@@ -98,6 +108,70 @@ impl GeminiParser {
             model,
             client,
         })
+    }
+
+    pub async fn classify(&self, raw_input: &str) -> Result<Option<GeminiClassification>> {
+        let prompt = format!(
+            "Classify this video file: \"{}\". Determine whether it is an actual animated anime episode of a TV series/OVA/Movie that should be synced to MyAnimeList, or if it is a bonus extra, special, creditless OP/ED, live-action footage, or non-anime content. Return JSON with keys: is_syncable_anime (bool), title (string or null), episode (int or null), season (int or null), content_type (string), reason (string).",
+            raw_input
+        );
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model, self.api_key
+        );
+
+        let body = serde_json::json!({
+            "contents": [{
+                "parts": [{ "text": prompt }]
+            }],
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("Gemini API request failed for model '{}'", self.model))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let err_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("Gemini API returned status {}: {}", status, err_text);
+        }
+
+        let gemini_resp: GeminiResponse = response
+            .json()
+            .await
+            .context("Failed to deserialize Gemini API response")?;
+
+        let Some(first_candidate) = gemini_resp.candidates.and_then(|c| c.into_iter().next())
+        else {
+            return Ok(None);
+        };
+        let Some(first_part) = first_candidate
+            .content
+            .and_then(|c| c.parts)
+            .and_then(|p| p.into_iter().next())
+        else {
+            return Ok(None);
+        };
+        let Some(raw_json) = first_part.text else {
+            return Ok(None);
+        };
+
+        let parsed: GeminiClassification = serde_json::from_str(&raw_json).with_context(|| {
+            format!(
+                "Failed to parse classification JSON from Gemini: {}",
+                raw_json
+            )
+        })?;
+
+        Ok(Some(parsed))
     }
 
     pub async fn parse(&self, raw_input: &str) -> Result<Option<AnimeInfo>> {
@@ -180,6 +254,7 @@ impl GeminiParser {
             Ok(Some(AnimeInfo {
                 title: parsed.title.trim().to_string(),
                 episode: parsed.episode,
+                season: None,
             }))
         }
     }

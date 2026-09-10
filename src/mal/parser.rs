@@ -5,6 +5,7 @@ use std::path::Path;
 pub struct AnimeInfo {
     pub title: String,
     pub episode: u32,
+    pub season: Option<u32>,
 }
 
 pub struct AnimeParser;
@@ -52,11 +53,12 @@ impl AnimeParser {
 
     fn extract_title_and_episode(text: &str) -> Option<AnimeInfo> {
         // Pattern 1: S01E04 or E04
-        if let Ok(re_se) = Regex::new(r"(?i)(.*?)\s+[S\d]*E(\d{1,4})(?:\s|$)") {
+        if let Ok(re_se) = Regex::new(r"(?i)(.*?)\s+(?:S(\d{1,2}))?E(\d{1,4})(?:\s|$)") {
             if let Some(caps) = re_se.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
-                let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
-                return Self::build_info(title, ep);
+                let season = caps.get(2).and_then(|m| m.as_str().parse::<u32>().ok());
+                let ep = caps.get(3)?.as_str().parse::<u32>().ok()?;
+                return Self::build_info(title, ep, season);
             }
         }
 
@@ -65,7 +67,7 @@ impl AnimeParser {
             if let Some(caps) = re_dash.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
                 let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
-                return Self::build_info(title, ep);
+                return Self::build_info(title, ep, None);
             }
         }
 
@@ -74,7 +76,7 @@ impl AnimeParser {
             if let Some(caps) = re_ep.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
                 let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
-                return Self::build_info(title, ep);
+                return Self::build_info(title, ep, None);
             }
         }
 
@@ -83,14 +85,36 @@ impl AnimeParser {
             if let Some(caps) = re_num.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
                 let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
-                return Self::build_info(title, ep);
+                return Self::build_info(title, ep, None);
             }
         }
 
         None
     }
 
-    fn build_info(raw_title: &str, episode: u32) -> Option<AnimeInfo> {
+    fn extract_season_from_title(title: &str) -> Option<u32> {
+        if let Ok(re_season) = Regex::new(r"(?i)\b(?:season|s)\s*(\d{1,2})\b") {
+            if let Some(caps) = re_season.captures(title) {
+                if let Some(num) = caps.get(1).and_then(|m| m.as_str().parse::<u32>().ok()) {
+                    return Some(num);
+                }
+            }
+        }
+        if let Ok(re_ord) = Regex::new(r"(?i)\b(\d{1,2})(?:nd|rd|th|st)\s*season\b") {
+            if let Some(caps) = re_ord.captures(title) {
+                if let Some(num) = caps.get(1).and_then(|m| m.as_str().parse::<u32>().ok()) {
+                    return Some(num);
+                }
+            }
+        }
+        None
+    }
+
+    fn build_info(
+        raw_title: &str,
+        episode: u32,
+        explicit_season: Option<u32>,
+    ) -> Option<AnimeInfo> {
         let clean_title = raw_title
             .replace('_', " ")
             .trim_matches(|c: char| c == '-' || c == ' ' || c == '.')
@@ -100,9 +124,11 @@ impl AnimeParser {
         if clean_title.is_empty() || episode == 0 {
             None
         } else {
+            let season = explicit_season.or_else(|| Self::extract_season_from_title(&clean_title));
             Some(AnimeInfo {
                 title: clean_title,
                 episode,
+                season,
             })
         }
     }
@@ -126,6 +152,7 @@ mod tests {
         let info = AnimeParser::parse(raw).expect("parsed");
         assert_eq!(info.title, "Chainsaw Man");
         assert_eq!(info.episode, 12);
+        assert_eq!(info.season, Some(1));
     }
 
     #[test]
@@ -134,6 +161,7 @@ mod tests {
         let info = AnimeParser::parse(raw).expect("parsed");
         assert_eq!(info.title, "One Piece");
         assert_eq!(info.episode, 1085);
+        assert_eq!(info.season, None);
     }
 
     #[test]
@@ -142,5 +170,6 @@ mod tests {
         let info = AnimeParser::parse(raw).expect("parsed");
         assert_eq!(info.title, "Jujutsu Kaisen 2nd Season");
         assert_eq!(info.episode, 5);
+        assert_eq!(info.season, Some(2));
     }
 }

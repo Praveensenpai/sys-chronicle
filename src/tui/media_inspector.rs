@@ -257,6 +257,27 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
                 Style::default().fg(Color::Yellow),
             )),
         ],
+        SyncStatus::NonSyncable { reason } => vec![
+            Line::from(Span::styled(
+                "⭐ Non-Syncable Media (Not an Anime Episode)",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("• Category: {}", reason),
+                Style::default().fg(Color::White),
+            )),
+            Line::from(Span::styled(
+                "• Flagged as a bonus feature, special, or non-anime content.",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                "• SysChronicle tracks playback locally, but skips syncing to MyAnimeList.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ],
     };
 
     let exp_block = Block::default()

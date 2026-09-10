@@ -8,7 +8,7 @@ use super::auth::MalAuth;
 use super::client::MalClient;
 use super::gemini::GeminiParser;
 use super::history::{AnimeSyncHistory, AnimeSyncRecord, SyncStatus};
-use super::parser::{AnimeInfo, AnimeParser};
+use super::parser::AnimeParser;
 use crate::logger::ActivityEvent;
 
 pub struct MalHandler;
@@ -57,20 +57,31 @@ impl MalHandler {
                 let duration = duration_secs.unwrap_or(0);
                 if duration > 0 {
                     let raw_media = path.as_deref().unwrap_or(&title).to_string();
-                    if let Some(info) = AnimeParser::parse(&raw_media) {
-                        let _ = AnimeSyncHistory::update_progress_full(
-                            crate::mal::history::ProgressUpdateParams {
-                                raw_title: &raw_media,
-                                canonical_title: &info.title,
-                                episode: info.episode,
-                                path,
-                                duration_secs: duration,
-                                watched_secs: 0,
-                                position_secs: Some(position_secs),
-                                intervals: &[],
-                            },
-                        );
-                    }
+                    let (canonical, ep) =
+                        if let Some(super::classifier::MediaClassification::NonSyncable {
+                            title: non_title,
+                            ..
+                        }) =
+                            super::classifier::AnimeClassifier::check_local_heuristics(&raw_media)
+                        {
+                            (non_title, 0)
+                        } else if let Some(info) = AnimeParser::parse(&raw_media) {
+                            (info.title, info.episode)
+                        } else {
+                            (title.clone(), 0)
+                        };
+                    let _ = AnimeSyncHistory::update_progress_full(
+                        crate::mal::history::ProgressUpdateParams {
+                            raw_title: &raw_media,
+                            canonical_title: &canonical,
+                            episode: ep,
+                            path,
+                            duration_secs: duration,
+                            watched_secs: 0,
+                            position_secs: Some(position_secs),
+                            intervals: &[],
+                        },
+                    );
                 }
             }
             _ => {}
@@ -91,14 +102,63 @@ impl MalHandler {
         force: bool,
     ) -> Result<Option<AnimeSyncRecord>> {
         let mut config = MalAuth::load_config()?;
-        let anime_info = Self::resolve_anime_info(raw_media, &config).await;
+        let classification = Self::resolve_media_classification(raw_media, &config).await;
 
-        let Some(info) = anime_info else {
-            println!(
-                "[sys-chronicle-mal] Could not identify anime title/episode from: \"{}\"",
-                raw_media
-            );
-            return Ok(None);
+        let info = match classification {
+            Some(super::classifier::MediaClassification::AnimeEpisode(info)) => info,
+            Some(super::classifier::MediaClassification::NonSyncable {
+                title,
+                content_type,
+                reason,
+            }) => {
+                println!(
+                    "[sys-chronicle-mal] Skipping MAL sync for non-syncable media: \"{}\" ({}) - {}",
+                    title, content_type, reason
+                );
+                let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let existing = AnimeSyncHistory::find_record(raw_media, &title, 0);
+                let final_dur = if duration_secs > 0 {
+                    duration_secs
+                } else {
+                    existing.as_ref().map(|e| e.duration_secs).unwrap_or(0)
+                };
+                let final_watched = if watched_secs > 0 {
+                    watched_secs
+                } else {
+                    existing.as_ref().map(|e| e.watched_secs).unwrap_or(0)
+                };
+                let record = AnimeSyncRecord {
+                    raw_title: raw_media.to_string(),
+                    canonical_title: title,
+                    episode: 0,
+                    path: Some(raw_media.to_string()),
+                    duration_secs: final_dur,
+                    watched_secs: final_watched,
+                    position_secs: Some(final_watched),
+                    watch_pct: if final_dur > 0 {
+                        (final_watched as f32 / final_dur as f32 * 100.0).min(100.0)
+                    } else {
+                        0.0
+                    },
+                    mal_anime_id: None,
+                    mal_current_ep: None,
+                    mal_total_episodes: None,
+                    status: SyncStatus::NonSyncable {
+                        reason: content_type,
+                    },
+                    last_updated: now,
+                    intervals: existing.map(|e| e.intervals).unwrap_or_default(),
+                };
+                let _ = AnimeSyncHistory::upsert(record.clone());
+                return Ok(Some(record));
+            }
+            None => {
+                println!(
+                    "[sys-chronicle-mal] Could not identify anime title/episode from: \"{}\"",
+                    raw_media
+                );
+                return Ok(None);
+            }
         };
 
         println!(
@@ -110,7 +170,9 @@ impl MalHandler {
         let client = MalClient::new(token)?;
 
         let search_results = client.search_anime(&info.title).await?;
-        let Some(anime) = search_results.into_iter().next() else {
+        let Some(anime) =
+            super::candidate::select_best_candidate(&search_results, &info.title, info.season)
+        else {
             println!(
                 "[sys-chronicle-mal] No search results found on MAL for: \"{}\"",
                 info.title
@@ -184,17 +246,37 @@ impl MalHandler {
             .as_ref()
             .map(|e| e.intervals.clone())
             .unwrap_or_default();
-        let position_secs = existing.and_then(|e| e.position_secs);
+        let position_secs = existing.as_ref().and_then(|e| e.position_secs);
+        let existing_duration = existing.as_ref().map(|e| e.duration_secs).unwrap_or(0);
+        let existing_watched = existing.as_ref().map(|e| e.watched_secs).unwrap_or(0);
+
+        let final_duration = if duration_secs > 0 {
+            duration_secs
+        } else {
+            existing_duration
+        };
+        let final_watched = if effective_watched > 0 {
+            effective_watched
+        } else {
+            existing_watched
+        };
+        let final_pct = if final_duration > 0 && final_watched >= final_duration.saturating_sub(3) {
+            100.0
+        } else if final_duration > 0 {
+            (final_watched as f32 / final_duration as f32 * 100.0).min(100.0)
+        } else {
+            watch_pct
+        };
 
         let record = AnimeSyncRecord {
             raw_title: raw_media.to_string(),
-            canonical_title: anime.title,
+            canonical_title: anime.title.clone(),
             episode: info.episode,
             path: Some(raw_media.to_string()),
-            duration_secs,
-            watched_secs: effective_watched,
+            duration_secs: final_duration,
+            watched_secs: final_watched,
             position_secs,
-            watch_pct,
+            watch_pct: final_pct,
             mal_anime_id: Some(anime.id),
             mal_current_ep: Some(if force {
                 info.episode
@@ -215,41 +297,21 @@ impl MalHandler {
         Ok(Some(record))
     }
 
-    async fn resolve_anime_info(
+    async fn resolve_media_classification(
         raw_media: &str,
         config: &super::auth::MalConfig,
-    ) -> Option<AnimeInfo> {
+    ) -> Option<super::classifier::MediaClassification> {
         let gemini_key = env::var("GEMINI_API_KEY")
             .ok()
             .or_else(|| config.gemini_api_key.clone())
             .filter(|k| !k.trim().is_empty());
 
-        if let Some(key) = gemini_key {
-            match GeminiParser::new(key, config.gemini_model.clone()) {
-                Ok(gemini) => match gemini.parse(raw_media).await {
-                    Ok(Some(info)) => return Some(info),
-                    Ok(None) => {
-                        eprintln!("[sys-chronicle-mal] Gemini returned empty match, trying regex parser...");
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[sys-chronicle-mal] Gemini parsing error ({}); falling back to regex.",
-                            e
-                        );
-                    }
-                },
-                Err(e) => {
-                    eprintln!(
-                        "[sys-chronicle-mal] Failed to initialize Gemini parser ({}); falling back to regex.",
-                        e
-                    );
-                }
-            }
-        } else {
-            println!("[sys-chronicle-mal] Notice: Gemini API key not configured; using local regex parser.");
-        }
+        let gemini =
+            gemini_key.and_then(|k| GeminiParser::new(k, config.gemini_model.clone()).ok());
 
-        AnimeParser::parse(raw_media)
+        super::classifier::AnimeClassifier::classify(raw_media, gemini.as_ref())
+            .await
+            .unwrap_or(None)
     }
 
     fn send_notification(title: &str, msg: &str) {

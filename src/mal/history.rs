@@ -14,6 +14,7 @@ pub enum SyncStatus {
     Synced,
     AheadOnMal { mal_episode: u32 },
     Failed { error: String },
+    NonSyncable { reason: String },
 }
 
 impl SyncStatus {
@@ -24,6 +25,13 @@ impl SyncStatus {
             SyncStatus::ThresholdMet => ("⏳ PENDING", ratatui::style::Color::Yellow),
             SyncStatus::Watching => ("▶ WATCHING", ratatui::style::Color::Blue),
             SyncStatus::Failed { .. } => ("✖ FAILED", ratatui::style::Color::Red),
+            SyncStatus::NonSyncable { reason } => match reason.as_str() {
+                "live_action" => ("🎬 LIVE-ACT", ratatui::style::Color::Magenta),
+                "special" => ("⭐ SPECIAL", ratatui::style::Color::Magenta),
+                "bonus" => ("🎁 BONUS", ratatui::style::Color::DarkGray),
+                "creditless" => ("🎵 NC OP/ED", ratatui::style::Color::DarkGray),
+                _ => ("🚫 NOT ANIME", ratatui::style::Color::DarkGray),
+            },
         }
     }
 }
@@ -62,6 +70,16 @@ pub struct ProgressUpdateParams<'a> {
 
 pub struct AnimeSyncHistory;
 
+fn normalize_for_match(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn matches_record(
     r: &AnimeSyncRecord,
     raw_title: &str,
@@ -71,7 +89,7 @@ fn matches_record(
     if episode > 0 && r.episode > 0 && r.episode != episode {
         return false;
     }
-    if r.canonical_title.eq_ignore_ascii_case(canonical_title) || r.raw_title == raw_title {
+    if r.raw_title == raw_title {
         return true;
     }
     let file_b = std::path::Path::new(raw_title).file_name();
@@ -85,9 +103,9 @@ fn matches_record(
             return true;
         }
     }
-    let c1 = r.canonical_title.to_lowercase();
-    let c2 = canonical_title.to_lowercase();
-    !c1.is_empty() && !c2.is_empty() && (c1.starts_with(&c2) || c2.starts_with(&c1))
+    let n1 = normalize_for_match(&r.canonical_title);
+    let n2 = normalize_for_match(canonical_title);
+    !n1.is_empty() && n1 == n2
 }
 
 impl AnimeSyncHistory {
@@ -220,17 +238,34 @@ impl AnimeSyncHistory {
             } else {
                 0.0
             };
-            let status = if watch_pct >= 80.0 {
-                SyncStatus::ThresholdMet
-            } else {
-                SyncStatus::Watching
-            };
+            let (status, canonical, episode) =
+                if let Some(super::classifier::MediaClassification::NonSyncable {
+                    title,
+                    reason,
+                    ..
+                }) = super::classifier::AnimeClassifier::check_local_heuristics(
+                    params.path.as_deref().unwrap_or(params.raw_title),
+                ) {
+                    (SyncStatus::NonSyncable { reason }, title, 0)
+                } else if watch_pct >= 80.0 {
+                    (
+                        SyncStatus::ThresholdMet,
+                        params.canonical_title.to_string(),
+                        params.episode,
+                    )
+                } else {
+                    (
+                        SyncStatus::Watching,
+                        params.canonical_title.to_string(),
+                        params.episode,
+                    )
+                };
             records.insert(
                 0,
                 AnimeSyncRecord {
                     raw_title: params.raw_title.to_string(),
-                    canonical_title: params.canonical_title.to_string(),
-                    episode: params.episode,
+                    canonical_title: canonical,
+                    episode,
                     path: params.path,
                     duration_secs: params.duration_secs,
                     watched_secs: actual_watched,
