@@ -96,7 +96,7 @@ impl GeminiParser {
     pub fn new(api_key: String, model_override: Option<String>) -> Result<Self> {
         let model = model_override
             .filter(|m| !m.trim().is_empty())
-            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+            .unwrap_or_else(|| "gemini-3.5-flash".to_string());
 
         let client = Client::builder()
             .timeout(Duration::from_secs(6))
