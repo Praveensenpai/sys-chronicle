@@ -1,70 +1,59 @@
-# sys-chronicle ⏱️
+<div align="center">
 
-> **High-Performance System Activity Logger, Interactive TUI Explorer & AI Context Generator for Arch Linux & Wayland**
+# ⏱️ sys-chronicle
+### システム・クロニクル — High-Performance System Activity Logger & Interactive TUI Explorer
 
-[![Release](https://img.shields.io/github/v/release/Praveensenpai/sys-chronicle?color=blue&style=flat-square)](https://github.com/Praveensenpai/sys-chronicle/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.style=flat-square)](LICENSE)
+> **Ultra-lightweight Wayland window focus tracker, Ratatui dashboard, and AI context generator for Arch Linux.**
 
-`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard that tracks active window focus, system power states, CPU/RAM utilization, CPU temperature, fan speed, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
+[![Latest Release](https://img.shields.io/github/v/release/Praveensenpai/sys-chronicle?style=for-the-badge&color=89b4fa)](https://github.com/Praveensenpai/sys-chronicle/releases)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024%20Edition-DEA584?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux-1793d1?style=for-the-badge&logo=archlinux&logoColor=white)](https://archlinux.org)
+[![Wayland](https://img.shields.io/badge/Compositor-Wayland%20%7C%20Hyprland-00a86b?style=for-the-badge&logo=wayland&logoColor=white)](https://hyprland.org)
+[![License](https://img.shields.io/badge/License-MIT-a6e3a1?style=for-the-badge)](LICENSE)
 
----
+<br>
 
-## ❓ The Problem & Why You Need `sys-chronicle`
+[📸 Visual Showcase](#-visual-showcase) • [⚡ Quick Start](#-quick-start) • [✨ Features](#-key-features) • [⌨️ Keybindings](#%EF%B8%8F-keyboard-shortcuts--controls) • [💻 CLI Usage](#-cli-usage) • [🎬 Anime & MAL Sync](#-myanimelist-companion-scrobbler-sys-chronicle-mal)
 
-1. **"What did I actually spend time on today?"**
-   - Traditional system monitors (`htop`, `btop`) show instant CPU spikes, but leave no persistent record of your actual window focus history or screen time throughout the day.
-2. **AI Assistance Needs High-Fidelity Context**
-   - When asking AI agents (Antigravity, Claude, ChatGPT, Gemini) to analyze your daily productivity, debug a system crash, or write daily progress digests, you lack exact timestamped evidence of what applications were open and what system resources were consumed.
-3. **Heavy Trackers Drain Battery & RAM**
-   - Electron-based time trackers consume hundreds of megabytes of RAM and heavy CPU polling. `sys-chronicle` uses event-driven Unix socket IPC for **0-CPU overhead** window logging.
-
----
-
-## 💡 How `sys-chronicle` Solves It
-
-- 🪟 **Reliable Hyprland Focus Logging**: Listens directly to Hyprland Wayland Unix socket events (`.socket2.sock`), reconciles the active window every five seconds, and finalizes the active session during a clean shutdown.
-- 🔎 **Focused vs. Running Context**: AI exports distinguish focused-window time from applications observed in periodic process samples, so long-running IDEs remain visible when focus events are noisy.
-- 📊 **Interactive TUI Dashboard**: Real-time process inspector, CPU temperature/fan-speed sensor panel, fuzzy search (`/`), metric sorting (`s`/`o`), process kill modal (`K`), and screen-time analytics tab (`Tab`).
-- 🤖 **1-Keypress AI Clipboard Export (`e`)**: Formats today's activity timeline into Markdown and pipes it straight into your Wayland clipboard (`wl-copy`).
-- ⚙️ **Automated Systemd Integration**: Managed as a background user daemon (`sys-chronicle.service`) using ~10 MB RAM.
-- 💾 **Lightweight JSONL Storage**: Saves rolling daily logs to `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl` (~3.6 MB/day).
+</div>
 
 ---
 
-## 🖥️ Interactive TUI Dashboard & Keyboard Shortcuts
+`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard. It silently tracks active window focus, system power states, CPU/RAM utilization, CPU temperature, fan speed, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
 
-Launch the dashboard anytime with:
-```bash
-sys-chronicle status
-```
+> [!TIP]
+> **Zero CPU Polling Overhead · ~10 MB RAM · Instant AI Clipboard Export (`e`)**
+> Listens directly to Hyprland's Wayland IPC socket (`.socket2.sock`) with event-driven zero polling overhead. Generates complete productivity timelines ready to pipe directly into your favorite LLM.
 
-### 📸 Visual Showcase
+---
+
+## 📸 Visual Showcase
 
 <div align="center">
 
-#### ⚡ Tab 1: Real-Time Live System Dashboard
+### ⚡ Tab 1: Real-Time Live System Dashboard
 *Live CPU & RAM utilization gauges, hardware sensor telemetry (Package Temp & Fan RPM), active Wayland window focus, and interactive process inspector.*
 
 ![Live Dashboard](assets/tui_live_dashboard.png)
 
 <br>
 
-#### 📊 Tab 2: Daily Accumulated Screen Time Analytics
-*Automated breakdown of active focused window time per application across the day.*
+### 📊 Tab 2: Daily Accumulated Screen Time Analytics
+*Automated breakdown of active focused window time per application across the entire day.*
 
 ![Daily Analytics](assets/tui_daily_analytics.png)
 
 <br>
 
-#### 🎬 Tab 3: Anime Chronicle & MyAnimeList Companion Inspector
-*Anti-cheat 80% unique coverage timeline gauge, seek-head vs watched progress tracking, and automated MAL synchronization status.*
+### 🎬 Tab 3: Anime Chronicle & MyAnimeList Companion Inspector
+*Anti-cheat 80% unique coverage timeline gauge, seek-head vs. watched progress tracking, and automated MAL synchronization status.*
 
 ![Anime & MAL Sync](assets/tui_anime_mal_sync.png)
 
 </div>
 
 <details>
-<summary><b>🧠 View Gemini 3.5 Flash AI Classifier & Non-Anime Extra Detection</b></summary>
+<summary><b>🧠 View Gemini 3.5 Flash AI Classifier & Non-Anime Extra Detection (Click to expand)</b></summary>
 <br>
 
 *Intelligent identification of live-action events, voice actress specials, Blu-ray extras, and audio dramas—bypassing MAL sync without polluting watch counts.*
@@ -77,9 +66,52 @@ sys-chronicle status
 
 </details>
 
-<br>
+---
 
-### ⌨️ Keybindings & Controls
+## 🚀 Quick Start
+
+### 🪄 One-Liner Magic (Recommended)
+
+Install `sys-chronicle` and its companion scrobbler in seconds:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Praveensenpai/sys-chronicle/main/install.sh | bash
+```
+
+### 📦 Build From Source
+
+```bash
+git clone https://github.com/Praveensenpai/sys-chronicle.git
+cd sys-chronicle
+cargo build --release
+cp target/release/sys-chronicle ~/.local/bin/
+cp target/release/sys-chronicle-mal ~/.local/bin/
+```
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+| :--- | :--- |
+| 🪟 **Event-Driven Focus Logging** | Connects to Hyprland Wayland IPC (`.socket2.sock`) for true **0% CPU polling** window focus capture. |
+| 📊 **Interactive Ratatui TUI** | 3 full-featured views: Live Telemetry, Daily Screen Time Analytics, and Anime Chronicle Inspector. |
+| 🎬 **Anti-Cheat 80% Scrobbler** | Merges disjoint intervals to calculate true unique playback coverage—no scrubbing exploits. |
+| 🧠 **Gemini 3.5 Flash AI Classifier** | Distinguishes canonical anime episodes from live-action events, Blu-ray extras, and bonuses. |
+| 🛡️ **Ahead-of-MAL Guard** | Prevents re-watching older episodes from accidentally downgrading progress already logged on MAL. |
+| 🤖 **1-Keypress AI Export (`e`)** | Formats today's complete timeline into Markdown and copies straight to clipboard (`wl-copy`). |
+| ⚙️ **Lightweight Systemd Daemon** | Operates silently as a background user daemon (`sys-chronicle.service`) consuming ~10 MB RAM. |
+| 💾 **Rolling JSONL Storage** | Saves daily audit trails to `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl`. |
+
+---
+
+## ⌨️ Keyboard Shortcuts & Controls
+
+Launch the interactive dashboard anytime with:
+
+```bash
+sys-chronicle status
+```
 
 | Shortcut | Action | Description |
 | :---: | :--- | :--- |
@@ -97,24 +129,7 @@ sys-chronicle status
 
 ---
 
-## 🚀 Installation
-
-### One-liner Quick Install
-```bash
-curl -sSL https://raw.githubusercontent.com/Praveensenpai/sys-chronicle/main/install.sh | bash
-```
-
-### From Source
-```bash
-git clone https://github.com/Praveensenpai/sys-chronicle.git
-cd sys-chronicle
-cargo build --release
-cp target/release/sys-chronicle ~/.local/bin/
-```
-
----
-
-## ⚙️ CLI Usage
+## 💻 CLI Usage
 
 ```bash
 # Launch interactive Ratatui TUI dashboard
@@ -138,31 +153,37 @@ sys-chronicle install-service
 
 ---
 
-## 🔌 Event-Driven Plugin System
-
-`sys-chronicle` features an asynchronous, non-blocking plugin hook engine. Any executable file placed inside `~/.config/sys-chronicle/plugins/` will automatically receive system activity events formatted as JSON over `stdin`.
-
-### Accurate 80% Watch Threshold Detection
-Unlike naive scrobblers that merely check `time-pos / duration >= 0.8` (which falsely triggers if you scrub to the end of a video) or count wall-clock seconds (which inflates if you replay a 2-minute scene 10 times), `sys-chronicle` uses **Unique Timeline Coverage**:
-- Continuously merges disjoint playback intervals `[start..end]`.
-- Calculates `unique_watched_seconds / video_duration >= 0.80`.
-- Once 80% real coverage is reached, emits a single `media_watch_threshold` event and triggers your plugins without spamming.
-
----
-
 ## 🎬 MyAnimeList Companion Scrobbler (`sys-chronicle-mal`)
 
-`sys-chronicle-mal` is an official companion binary that syncs watched anime to MyAnimeList when reaching the real 80% watch threshold in MPV.
+`sys-chronicle-mal` is the official companion binary that scrobbles watched anime to MyAnimeList when reaching the real 80% watch threshold in MPV.
 
-### Features
+### Accurate 80% Watch Threshold Detection
+
+Unlike naive scrobblers that merely check `time-pos / duration >= 0.8` (which triggers if you scrub to the credits) or count wall-clock seconds (which inflates if you loop a 2-minute scene), `sys-chronicle` uses **Unique Timeline Coverage**:
+
+```text
+Playback Timeline:
+[00:00 ─── Episode Start ─── 05:00]  ✔ Watched (5 mins)
+               [08:00 ─────── 18:00]  ✔ Watched (10 mins)
+                              [20:00 ─── 24:00]  ✔ Watched (4 mins)
+───────────────────────────────────────────────────────────────────
+Total Unique Watched: 19 mins / 24 mins = 79.1% (Pending...)
++ Continuous Watch to 19:13 = 80.0% ──➔ 🚀 [✔ SYNCED to MyAnimeList]
+```
+
+- Continuously merges disjoint playback intervals `[start..end]`.
+- Calculates `unique_watched_seconds / video_duration >= 0.80`.
+- Once 80% real coverage is reached, triggers MAL synchronization without spamming.
+
+### Scrobbler Features
 - 🔑 **Official MAL API v2 with PKCE OAuth2**: Secure interactive browser login with zero secret leaking.
-- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash Lite (`gemini-3.5-flash-lite`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
-- 📊 **Dedicated 3rd TUI Tab (`sys-chronicle status`)**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[⏳ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[✗ FAILED]`).
-- 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes (e.g. Episode 4 reaching 80%) from overwriting higher progress already recorded on MyAnimeList (e.g. Episode 6).
-- ⚡ **Manual & Force Sync**: Trigger instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.
+- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash (`gemini-3.5-flash`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
+- 📊 **Dedicated 3rd TUI Tab**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[▶ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[🎬 LIVE-ACT]`).
+- 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes from overwriting higher progress already recorded on MyAnimeList.
+- ⚡ **Manual & Force Sync**: Instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.
 - 🔔 **Desktop Notifications**: Sends desktop alerts via `notify-send` when an episode is updated.
 
-### Setup & Usage
+### Setup & Commands
 
 ```bash
 # 1. Connect your MyAnimeList account (and optionally provide Gemini API Key)
@@ -182,6 +203,12 @@ sys-chronicle-mal sync "Sousou no Frieren" --force
 mkdir -p ~/.config/sys-chronicle/plugins
 ln -sf ~/.local/bin/sys-chronicle-mal ~/.config/sys-chronicle/plugins/sys-chronicle-mal
 ```
+
+---
+
+## 🔌 Event-Driven Plugin System
+
+`sys-chronicle` features an asynchronous, non-blocking plugin hook engine. Any executable file placed inside `~/.config/sys-chronicle/plugins/` will automatically receive system activity events formatted as JSON over `stdin`.
 
 ---
 
