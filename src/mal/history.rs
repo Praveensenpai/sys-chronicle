@@ -112,7 +112,8 @@ impl AnimeSyncHistory {
             (r.canonical_title
                 .eq_ignore_ascii_case(&record.canonical_title)
                 && r.episode == record.episode)
-                || r.raw_title == record.raw_title
+                || (r.raw_title == record.raw_title
+                    && (record.episode == 0 || r.episode == record.episode))
         }) {
             records[idx] = record;
         } else {
@@ -129,7 +130,7 @@ impl AnimeSyncHistory {
         let records = Self::load_all().ok()?;
         records.into_iter().find(|r| {
             (r.canonical_title.eq_ignore_ascii_case(canonical_title) && r.episode == episode)
-                || r.raw_title == raw_title
+                || (r.raw_title == raw_title && (episode == 0 || r.episode == episode))
         })
     }
 
@@ -137,17 +138,29 @@ impl AnimeSyncHistory {
         let mut records = Self::load_all().unwrap_or_default();
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
+        let is_completed = params.duration_secs > 0
+            && (params.watched_secs >= params.duration_secs.saturating_sub(3)
+                || (params.watched_secs as f64 / params.duration_secs as f64) >= 0.99);
+        let effective_watched = if is_completed {
+            params.duration_secs
+        } else {
+            params.watched_secs
+        };
+
         if let Some(r) = records.iter_mut().find(|r| {
             (r.canonical_title
                 .eq_ignore_ascii_case(params.canonical_title)
                 && r.episode == params.episode)
-                || r.raw_title == params.raw_title
+                || (r.raw_title == params.raw_title
+                    && (params.episode == 0 || r.episode == params.episode))
         }) {
             // Anti-cheat: watched_secs can NEVER decrease upon seek or rewatch
-            r.watched_secs = r.watched_secs.max(params.watched_secs);
+            r.watched_secs = r.watched_secs.max(effective_watched);
             r.duration_secs = params.duration_secs;
             r.position_secs = params.position_secs.or(r.position_secs);
-            r.watch_pct = if params.duration_secs > 0 {
+            r.watch_pct = if is_completed {
+                100.0
+            } else if params.duration_secs > 0 {
                 (r.watched_secs as f32 / params.duration_secs as f32 * 100.0).min(100.0)
             } else {
                 0.0
@@ -160,8 +173,10 @@ impl AnimeSyncHistory {
                 r.status = SyncStatus::ThresholdMet;
             }
         } else {
-            let actual_watched = params.watched_secs;
-            let watch_pct = if params.duration_secs > 0 {
+            let actual_watched = effective_watched;
+            let watch_pct = if is_completed {
+                100.0
+            } else if params.duration_secs > 0 {
                 (actual_watched as f32 / params.duration_secs as f32 * 100.0).min(100.0)
             } else {
                 0.0

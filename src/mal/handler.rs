@@ -125,10 +125,18 @@ impl MalHandler {
             .unwrap_or(0);
 
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let watch_pct = if duration_secs > 0 {
-            (watched_secs as f32 / duration_secs as f32 * 100.0).min(100.0)
+        let is_completed = duration_secs > 0
+            && (watched_secs >= duration_secs.saturating_sub(3)
+                || (watched_secs as f64 / duration_secs as f64) >= 0.99);
+        let (effective_watched, watch_pct) = if is_completed {
+            (duration_secs, 100.0)
+        } else if duration_secs > 0 {
+            (
+                watched_secs,
+                (watched_secs as f32 / duration_secs as f32 * 100.0).min(100.0),
+            )
         } else {
-            100.0
+            (watched_secs, 100.0)
         };
 
         let status = if current_watched > info.episode && !force {
@@ -184,11 +192,15 @@ impl MalHandler {
             episode: info.episode,
             path: Some(raw_media.to_string()),
             duration_secs,
-            watched_secs,
+            watched_secs: effective_watched,
             position_secs,
             watch_pct,
             mal_anime_id: Some(anime.id),
-            mal_current_ep: Some(current_watched.max(info.episode)),
+            mal_current_ep: Some(if force {
+                info.episode
+            } else {
+                current_watched.max(info.episode)
+            }),
             mal_total_episodes: if anime.num_episodes > 0 {
                 Some(anime.num_episodes)
             } else {

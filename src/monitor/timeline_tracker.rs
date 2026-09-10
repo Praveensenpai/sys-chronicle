@@ -110,7 +110,12 @@ impl UniqueTimelineTracker {
         }
 
         let unique = self.total_unique_secs();
-        ((unique as f64 / duration as f64) * 100.0) as f32
+        if unique >= duration.saturating_sub(3) || (unique as f64 / duration as f64) >= 0.99 {
+            return 100.0;
+        }
+
+        let pct = ((unique as f64 / duration as f64) * 100.0) as f32;
+        pct.min(100.0)
     }
 
     pub fn check_threshold(&mut self, threshold_pct: f32) -> Option<(u64, u64, f32)> {
@@ -126,7 +131,12 @@ impl UniqueTimelineTracker {
         let pct = self.coverage_pct();
         if pct >= threshold_pct {
             self.threshold_triggered = true;
-            Some((duration, self.total_unique_secs(), pct))
+            let watched = if pct >= 100.0 {
+                duration
+            } else {
+                self.total_unique_secs()
+            };
+            Some((duration, watched, pct))
         } else {
             None
         }

@@ -1,5 +1,6 @@
 pub mod metrics;
 pub mod mpv;
+pub mod mpv_session;
 pub mod power;
 pub mod timeline_tracker;
 pub mod window;
@@ -7,5 +8,5 @@ pub mod window;
 pub use metrics::MetricsMonitor;
 pub use mpv::MpvMonitor;
 pub use power::PowerMonitor;
-pub use timeline_tracker::{PlaybackInterval, UniqueTimelineTracker};
+pub use timeline_tracker::PlaybackInterval;
 pub use window::WindowMonitor;
