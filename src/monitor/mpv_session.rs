@@ -117,7 +117,18 @@ impl MpvPlaybackSession {
         }
 
         if !self.title.is_empty() && (self.title == file_name || self.path.is_none()) {
-            self.path = Some(new_path_str);
+            self.path = Some(new_path_str.clone());
+            if self.tracker.intervals().is_empty() {
+                if let Some(info) = AnimeParser::parse(&new_path_str) {
+                    if let Some(existing) =
+                        AnimeSyncHistory::find_record(&new_path_str, &info.title, info.episode)
+                    {
+                        if existing.episode == info.episode && !existing.intervals.is_empty() {
+                            self.tracker.load_intervals(&existing.intervals);
+                        }
+                    }
+                }
+            }
             self.sync_history();
         } else {
             let title = if file_name.is_empty() {

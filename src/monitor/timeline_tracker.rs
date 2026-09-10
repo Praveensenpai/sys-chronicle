@@ -24,9 +24,33 @@ impl UniqueTimelineTracker {
         &self.intervals
     }
 
+    pub fn merge_interval_lists(
+        a: &[PlaybackInterval],
+        b: &[PlaybackInterval],
+    ) -> Vec<PlaybackInterval> {
+        let mut combined = Vec::with_capacity(a.len() + b.len());
+        combined.extend_from_slice(a);
+        combined.extend_from_slice(b);
+        combined.retain(|i| i.start < i.end);
+        if combined.len() <= 1 {
+            return combined;
+        }
+        combined.sort_by_key(|i| i.start);
+        let mut merged: Vec<PlaybackInterval> = Vec::with_capacity(combined.len());
+        for interval in combined {
+            if let Some(last) = merged.last_mut() {
+                if interval.start <= last.end {
+                    last.end = last.end.max(interval.end);
+                    continue;
+                }
+            }
+            merged.push(interval);
+        }
+        merged
+    }
+
     pub fn load_intervals(&mut self, intervals: &[PlaybackInterval]) {
-        self.intervals = intervals.to_vec();
-        self.merge_intervals();
+        self.intervals = Self::merge_interval_lists(&self.intervals, intervals);
     }
 
     pub fn set_media(&mut self, media_key: &str, duration: Option<u64>) {

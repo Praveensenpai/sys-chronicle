@@ -62,6 +62,34 @@ pub struct ProgressUpdateParams<'a> {
 
 pub struct AnimeSyncHistory;
 
+fn matches_record(
+    r: &AnimeSyncRecord,
+    raw_title: &str,
+    canonical_title: &str,
+    episode: u32,
+) -> bool {
+    if episode > 0 && r.episode > 0 && r.episode != episode {
+        return false;
+    }
+    if r.canonical_title.eq_ignore_ascii_case(canonical_title) || r.raw_title == raw_title {
+        return true;
+    }
+    let file_b = std::path::Path::new(raw_title).file_name();
+    if let (Some(a), Some(b)) = (std::path::Path::new(&r.raw_title).file_name(), file_b) {
+        if a == b {
+            return true;
+        }
+    }
+    if let (Some(ref p), Some(b)) = (&r.path, file_b) {
+        if std::path::Path::new(p).file_name() == Some(b) {
+            return true;
+        }
+    }
+    let c1 = r.canonical_title.to_lowercase();
+    let c2 = canonical_title.to_lowercase();
+    !c1.is_empty() && !c2.is_empty() && (c1.starts_with(&c2) || c2.starts_with(&c1))
+}
+
 impl AnimeSyncHistory {
     pub fn storage_path() -> PathBuf {
         #[cfg(test)]
@@ -109,11 +137,12 @@ impl AnimeSyncHistory {
     pub fn upsert(record: AnimeSyncRecord) -> Result<()> {
         let mut records = Self::load_all().unwrap_or_default();
         if let Some(idx) = records.iter().position(|r| {
-            (r.canonical_title
-                .eq_ignore_ascii_case(&record.canonical_title)
-                && r.episode == record.episode)
-                || (r.raw_title == record.raw_title
-                    && (record.episode == 0 || r.episode == record.episode))
+            matches_record(
+                r,
+                &record.raw_title,
+                &record.canonical_title,
+                record.episode,
+            )
         }) {
             records[idx] = record;
         } else {
@@ -128,10 +157,9 @@ impl AnimeSyncHistory {
         episode: u32,
     ) -> Option<AnimeSyncRecord> {
         let records = Self::load_all().ok()?;
-        records.into_iter().find(|r| {
-            (r.canonical_title.eq_ignore_ascii_case(canonical_title) && r.episode == episode)
-                || (r.raw_title == raw_title && (episode == 0 || r.episode == episode))
-        })
+        records
+            .into_iter()
+            .find(|r| matches_record(r, raw_title, canonical_title, episode))
     }
 
     pub fn update_progress_full(params: ProgressUpdateParams<'_>) -> Result<()> {
@@ -147,27 +175,38 @@ impl AnimeSyncHistory {
             params.watched_secs
         };
 
-        if let Some(r) = records.iter_mut().find(|r| {
-            (r.canonical_title
-                .eq_ignore_ascii_case(params.canonical_title)
-                && r.episode == params.episode)
-                || (r.raw_title == params.raw_title
-                    && (params.episode == 0 || r.episode == params.episode))
-        }) {
-            // Anti-cheat: watched_secs can NEVER decrease upon seek or rewatch
-            r.watched_secs = r.watched_secs.max(effective_watched);
+        if let Some(r) = records
+            .iter_mut()
+            .find(|r| matches_record(r, params.raw_title, params.canonical_title, params.episode))
+        {
+            if !params.intervals.is_empty() {
+                r.intervals =
+                    crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
+                        &r.intervals,
+                        params.intervals,
+                    );
+            }
+            let unique_secs = r
+                .intervals
+                .iter()
+                .map(|i| i.end.saturating_sub(i.start))
+                .sum::<u64>();
+            let watched = unique_secs.max(r.watched_secs).max(effective_watched);
+            r.watched_secs = watched;
             r.duration_secs = params.duration_secs;
             r.position_secs = params.position_secs.or(r.position_secs);
-            r.watch_pct = if is_completed {
+
+            let is_comp = params.duration_secs > 0
+                && (watched >= params.duration_secs.saturating_sub(3)
+                    || (watched as f64 / params.duration_secs as f64) >= 0.99);
+
+            r.watch_pct = if is_comp {
                 100.0
             } else if params.duration_secs > 0 {
-                (r.watched_secs as f32 / params.duration_secs as f32 * 100.0).min(100.0)
+                (watched as f32 / params.duration_secs as f32 * 100.0).min(100.0)
             } else {
                 0.0
             };
-            if !params.intervals.is_empty() {
-                r.intervals = params.intervals.to_vec();
-            }
             r.last_updated = now;
             if r.status == SyncStatus::Watching && r.watch_pct >= 80.0 {
                 r.status = SyncStatus::ThresholdMet;
