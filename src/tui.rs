@@ -578,6 +578,43 @@ pub fn run_status_tui() -> Result<()> {
                 } else {
                     Color::Green
                 };
+                let health_line = match (pow.health_pct, pow.cycle_count) {
+                    (Some(h), Some(c)) => {
+                        let h_color = if h >= 80.0 {
+                            Color::Green
+                        } else if h >= 60.0 {
+                            Color::Yellow
+                        } else {
+                            Color::Red
+                        };
+                        Line::from(vec![
+                            Span::styled("Health: ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{h:.1}%"), Style::default().fg(h_color).add_modifier(Modifier::BOLD)),
+                            Span::styled(format!(" ({c} cyc)"), Style::default().fg(Color::DarkGray)),
+                        ])
+                    }
+                    (Some(h), None) => {
+                        let h_color = if h >= 80.0 {
+                            Color::Green
+                        } else if h >= 60.0 {
+                            Color::Yellow
+                        } else {
+                            Color::Red
+                        };
+                        Line::from(vec![
+                            Span::styled("Health: ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{h:.1}%"), Style::default().fg(h_color).add_modifier(Modifier::BOLD)),
+                        ])
+                    }
+                    (None, Some(c)) => Line::from(vec![
+                        Span::styled("Cycles: ", Style::default().fg(Color::Gray)),
+                        Span::styled(format!("{c}"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    ]),
+                    (None, None) => Line::from(vec![
+                        Span::styled("Health: ", Style::default().fg(Color::Gray)),
+                        Span::styled("Unavailable", Style::default().fg(Color::DarkGray)),
+                    ]),
+                };
                 vec![
                     Line::from(vec![
                         Span::styled("Capacity: ", Style::default().fg(Color::Gray)),
@@ -590,6 +627,7 @@ pub fn run_status_tui() -> Result<()> {
                         Span::styled("Power Source: ", Style::default().fg(Color::Gray)),
                         Span::styled(ac_str, Style::default().fg(Color::Magenta)),
                     ]),
+                    health_line,
                 ]
             } else {
                 vec![Line::from(Span::raw("No battery detected"))]

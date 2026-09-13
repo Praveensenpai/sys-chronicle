@@ -68,7 +68,7 @@
 | **`src/monitor/`** | | |
 | `src/monitor/mod.rs` | Re-exports | Exports monitors, `PlaybackInterval`, and tracker types. |
 | `src/monitor/window.rs` | `WindowMonitor`, `HyprActiveWindow` | Connects to Hyprland IPC `.socket2.sock`. Listens for `activewindow>>` and `windowtitle>>`. Computes dwell duration on switch. Falls back to `hyprctl activewindow -j` polling if socket drops. |
-| `src/monitor/power.rs` | `PowerMonitor`, `PowerState` | Inspects `/sys/class/power_supply` for `BAT*` (capacity, status) and `AC*`/`ADP*` (online). Emits events on state shift, $\ge 2\%$ change, or 5-min heartbeat. |
+| `src/monitor/power.rs` | `PowerMonitor`, `PowerState` | Inspects `/sys/class/power_supply` for `BAT*` (capacity, status, `health_pct`, `cycle_count`) and `AC*`/`ADP*` (online). Emits events on state shift, $\ge 2\%$ change, or 5-min heartbeat. |
 | `src/monitor/metrics.rs` | `MetricsMonitor`, `MetricsSnapshot`, `AppDetail` | `sysinfo` process sampler. Deduplicates kernel/worker threads via `/proc/{pid}/status` (`Pid == Tgid`) and tracks physical VmRSS memory. Reads `/sys/class/hwmon` for CPU package temp and fan RPM. |
 | `src/monitor/mpv.rs` | `MpvMonitor`, `MpvEvent` | Connects to MPV Unix domain socket (`/tmp/mpvsocket`, `$XDG_RUNTIME_DIR/mpvsocket`). Observes properties (`media-title`, `path`, `pause`, `time-pos`, `duration`). Dispatches events to writer and plugins. |
 | `src/monitor/mpv_session.rs`| `MpvPlaybackSession`, `MpvProgressParams` | Maintains active MPV session state machine. Detects title/path transitions, pause/resume, seek forward/backward ($>5$s), updates `UniqueTimelineTracker`, debounces sync to `AnimeSyncHistory` every 3s. |
@@ -165,7 +165,9 @@ All events written to `activity-YYYY-MM-DD.jsonl` are tagged with `"type"`:
   "timestamp": "2026-09-13T18:00:00.123+05:30",
   "status": "Discharging",
   "capacity": 85,
-  "ac_online": false
+  "ac_online": false,
+  "health_pct": 82.5,
+  "cycle_count": 215
 }
 ```
 

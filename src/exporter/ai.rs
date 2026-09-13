@@ -233,6 +233,8 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
             status,
             capacity,
             ac_online,
+            health_pct,
+            cycle_count,
         } = event
         {
             let time_str = extract_short_time(timestamp);
@@ -241,9 +243,15 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
             } else {
                 "Battery Power"
             };
+            let extra_str = match (health_pct, cycle_count) {
+                (Some(h), Some(c)) => format!(" [Health: {h:.1}%, Cycles: {c}]"),
+                (Some(h), None) => format!(" [Health: {h:.1}%]"),
+                (None, Some(c)) => format!(" [Cycles: {c}]"),
+                (None, None) => String::new(),
+            };
             report.push_str(&format!(
-                "- `[{}]` Battery **{}%** | Status: **{}** ({})\n",
-                time_str, capacity, status, ac_str
+                "- `[{}]` Battery **{}%** | Status: **{}** ({}){}\n",
+                time_str, capacity, status, ac_str, extra_str
             ));
             power_events_count += 1;
         }

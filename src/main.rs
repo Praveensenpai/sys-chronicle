@@ -137,7 +137,16 @@ async fn main() -> Result<()> {
                     } else {
                         "Unplugged"
                     };
-                    println!("Battery: {}% ({}, {})", pow.capacity, pow.status, ac_str);
+                    let health_str = match (pow.health_pct, pow.cycle_count) {
+                        (Some(h), Some(c)) => format!(" | Health: {:.1}% ({} cycles)", h, c),
+                        (Some(h), None) => format!(" | Health: {:.1}%", h),
+                        (None, Some(c)) => format!(" | Cycles: {}", c),
+                        (None, None) => String::new(),
+                    };
+                    println!(
+                        "Battery: {}% ({}, {}){}",
+                        pow.capacity, pow.status, ac_str, health_str
+                    );
                 } else {
                     println!("Battery: Unknown / Desktop");
                 }

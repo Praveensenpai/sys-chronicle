@@ -15,6 +15,10 @@ pub enum ActivityEvent {
         status: String,
         capacity: u8,
         ac_online: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        health_pct: Option<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cycle_count: Option<u32>,
     },
     SystemMetrics {
         timestamp: String,
