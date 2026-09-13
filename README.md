@@ -177,7 +177,7 @@ Total Unique Watched: 19 mins / 24 mins = 79.1% (Pending...)
 
 ### Scrobbler Features
 - 🔑 **Official MAL API v2 with PKCE OAuth2**: Secure interactive browser login with zero secret leaking.
-- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash (`gemini-3.5-flash`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
+- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash-Lite (`gemini-3.1-flash-lite`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
 - 📊 **Dedicated 3rd TUI Tab**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[▶ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[🎬 LIVE-ACT]`).
 - 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes from overwriting higher progress already recorded on MyAnimeList.
 - ⚡ **Manual & Force Sync**: Instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.

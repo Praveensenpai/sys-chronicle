@@ -166,7 +166,121 @@ impl MalHandler {
             info.title, info.episode
         );
 
-        let token = MalAuth::get_valid_token(&mut config).await?;
+        let mal_outcome = match Self::sync_with_mal(&mut config, &info, force).await {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!(
+                    "[sys-chronicle-mal] Network or MAL API error ({}). Saving local watch record.",
+                    e
+                );
+                None
+            }
+        };
+
+        let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let is_completed = duration_secs > 0
+            && (watched_secs >= duration_secs.saturating_sub(3)
+                || (watched_secs as f64 / duration_secs as f64) >= 0.99);
+        let (effective_watched, watch_pct) = if is_completed {
+            (duration_secs, 100.0)
+        } else if duration_secs > 0 {
+            (
+                watched_secs,
+                (watched_secs as f32 / duration_secs as f32 * 100.0).min(100.0),
+            )
+        } else {
+            (watched_secs, 100.0)
+        };
+
+        let existing = AnimeSyncHistory::find_record(raw_media, &info.title, info.episode);
+        let intervals = existing
+            .as_ref()
+            .map(|e| e.intervals.clone())
+            .unwrap_or_default();
+        let position_secs = existing.as_ref().and_then(|e| e.position_secs);
+        let existing_duration = existing.as_ref().map(|e| e.duration_secs).unwrap_or(0);
+        let existing_watched = existing.as_ref().map(|e| e.watched_secs).unwrap_or(0);
+
+        let final_duration = if duration_secs > 0 {
+            duration_secs
+        } else {
+            existing_duration
+        };
+        let final_watched = if effective_watched > 0 {
+            effective_watched
+        } else {
+            existing_watched
+        };
+        let final_pct = if final_duration > 0 && final_watched >= final_duration.saturating_sub(3) {
+            100.0
+        } else if final_duration > 0 {
+            (final_watched as f32 / final_duration as f32 * 100.0).min(100.0)
+        } else {
+            watch_pct
+        };
+
+        let (canonical_title, mal_anime_id, mal_current_ep, mal_total_episodes, final_status) =
+            if let Some((anime, current_watched, status)) = mal_outcome {
+                (
+                    anime.title,
+                    Some(anime.id),
+                    Some(if force {
+                        info.episode
+                    } else {
+                        current_watched.max(info.episode)
+                    }),
+                    if anime.num_episodes > 0 {
+                        Some(anime.num_episodes)
+                    } else {
+                        None
+                    },
+                    status,
+                )
+            } else {
+                let fallback_status = if final_pct >= 80.0 {
+                    SyncStatus::ThresholdMet
+                } else {
+                    SyncStatus::Watching
+                };
+                (
+                    existing
+                        .as_ref()
+                        .map(|e| e.canonical_title.clone())
+                        .unwrap_or_else(|| info.title.clone()),
+                    existing.as_ref().and_then(|e| e.mal_anime_id),
+                    existing.as_ref().and_then(|e| e.mal_current_ep),
+                    existing.as_ref().and_then(|e| e.mal_total_episodes),
+                    fallback_status,
+                )
+            };
+
+        let record = AnimeSyncRecord {
+            raw_title: raw_media.to_string(),
+            canonical_title,
+            episode: info.episode,
+            path: Some(raw_media.to_string()),
+            duration_secs: final_duration,
+            watched_secs: final_watched,
+            position_secs,
+            watch_pct: final_pct,
+            mal_anime_id,
+            mal_current_ep,
+            mal_total_episodes,
+            status: final_status,
+            last_updated: now,
+            intervals,
+        };
+
+        let _ = AnimeSyncHistory::upsert(record.clone());
+        Ok(Some(record))
+    }
+
+    async fn sync_with_mal(
+        config: &mut super::auth::MalConfig,
+        info: &super::parser::AnimeInfo,
+        force: bool,
+    ) -> Result<Option<(super::client::MalAnimeNode, u32, SyncStatus)>> {
+        let token = MalAuth::get_valid_token(config).await?;
         let client = MalClient::new(token)?;
 
         let search_results = client.search_anime(&info.title).await?;
@@ -185,21 +299,6 @@ impl MalHandler {
             .as_ref()
             .map(|s| s.num_episodes_watched)
             .unwrap_or(0);
-
-        let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let is_completed = duration_secs > 0
-            && (watched_secs >= duration_secs.saturating_sub(3)
-                || (watched_secs as f64 / duration_secs as f64) >= 0.99);
-        let (effective_watched, watch_pct) = if is_completed {
-            (duration_secs, 100.0)
-        } else if duration_secs > 0 {
-            (
-                watched_secs,
-                (watched_secs as f32 / duration_secs as f32 * 100.0).min(100.0),
-            )
-        } else {
-            (watched_secs, 100.0)
-        };
 
         let status = if current_watched > info.episode && !force {
             println!(
@@ -241,60 +340,7 @@ impl MalHandler {
             SyncStatus::Synced
         };
 
-        let existing = AnimeSyncHistory::find_record(raw_media, &anime.title, info.episode);
-        let intervals = existing
-            .as_ref()
-            .map(|e| e.intervals.clone())
-            .unwrap_or_default();
-        let position_secs = existing.as_ref().and_then(|e| e.position_secs);
-        let existing_duration = existing.as_ref().map(|e| e.duration_secs).unwrap_or(0);
-        let existing_watched = existing.as_ref().map(|e| e.watched_secs).unwrap_or(0);
-
-        let final_duration = if duration_secs > 0 {
-            duration_secs
-        } else {
-            existing_duration
-        };
-        let final_watched = if effective_watched > 0 {
-            effective_watched
-        } else {
-            existing_watched
-        };
-        let final_pct = if final_duration > 0 && final_watched >= final_duration.saturating_sub(3) {
-            100.0
-        } else if final_duration > 0 {
-            (final_watched as f32 / final_duration as f32 * 100.0).min(100.0)
-        } else {
-            watch_pct
-        };
-
-        let record = AnimeSyncRecord {
-            raw_title: raw_media.to_string(),
-            canonical_title: anime.title.clone(),
-            episode: info.episode,
-            path: Some(raw_media.to_string()),
-            duration_secs: final_duration,
-            watched_secs: final_watched,
-            position_secs,
-            watch_pct: final_pct,
-            mal_anime_id: Some(anime.id),
-            mal_current_ep: Some(if force {
-                info.episode
-            } else {
-                current_watched.max(info.episode)
-            }),
-            mal_total_episodes: if anime.num_episodes > 0 {
-                Some(anime.num_episodes)
-            } else {
-                None
-            },
-            status,
-            last_updated: now,
-            intervals,
-        };
-
-        let _ = AnimeSyncHistory::upsert(record.clone());
-        Ok(Some(record))
+        Ok(Some((anime.clone(), current_watched, status)))
     }
 
     async fn resolve_media_classification(

@@ -42,7 +42,7 @@
                                               ┌─────────────────────────────────┴───────────────────────────────┐
                                               ▼                                                                 ▼
                                ┌─────────────────────────────┐                                   ┌─────────────────────────────┐
-                               │     Gemini 3.5 Flash AI     │                                   │     MyAnimeList API v2      │
+                               │   Gemini 3.1 Flash-Lite AI  │                                   │     MyAnimeList API v2      │
                                │ Classifier & Episode Parser │                                   │ (OAuth2 PKCE Scrobbler)     │
                                └─────────────────────────────┘                                   └─────────────────────────────┘
 ```
@@ -77,9 +77,9 @@
 | `src/mal.rs` | Module re-exports | Exposes all MAL client, auth, parser, and history interfaces. |
 | `src/mal/auth.rs` | `MalAuth`, `MalConfig`, `TokenResponse` | MAL OAuth2 PKCE flow. Spins up temporary local server on `127.0.0.1:8080/callback`. Auto-refreshes tokens expiring within 5 min. Config stored in `~/.config/sys-chronicle/mal_config.json`. |
 | `src/mal/candidate.rs` | `select_best_candidate()`, `score_candidate()` | Scored candidate matching against MAL search results. Awards points for title match (+150), season match (+100), user list presence (+50); heavily penalizes mismatched seasons (-200), movies, and specials (-200). |
-| `src/mal/classifier.rs` | `AnimeClassifier`, `MediaClassification` | Filters non-syncable content (bonus extras, creditless OP/EDs, live-action footage, trailers, disc menus) using directory heuristics and Gemini 3.5 Flash AI classifier. |
+| `src/mal/classifier.rs` | `AnimeClassifier`, `MediaClassification` | Filters non-syncable content (bonus extras, creditless OP/EDs, live-action footage, trailers, disc menus) using directory heuristics and Gemini 3.1 Flash-Lite AI classifier. |
 | `src/mal/client.rs` | `MalClient`, `MalAnimeNode`, `UserProfile`, `UserListStatus` | Reqwest HTTP client for MyAnimeList API v2 (`/users/@me`, `/anime?q=...`, `/anime/{id}/my_list_status`). Sets status to `watching` or `completed`. |
-| `src/mal/gemini.rs` | `GeminiParser`, `GeminiClassification` | Google Gemini 3.5 Flash REST client. Uses structured output (`responseSchema`) to extract canonical titles, episode numbers, and non-syncable classifications. |
+| `src/mal/gemini.rs` | `GeminiParser`, `GeminiClassification` | Google Gemini 3.1 Flash-Lite REST client. Uses structured output (`responseSchema`) to extract canonical titles, episode numbers, and non-syncable classifications. |
 | `src/mal/handler.rs` | `MalHandler` | Central scrobbler coordinator. Handles stdin JSON hook, 80% threshold events, classification, candidate search, "Ahead-of-MAL" downgrade guard, and `notify-send` desktop alerts. |
 | `src/mal/history.rs` | `AnimeSyncHistory`, `AnimeSyncRecord`, `SyncStatus` | Local persistent state in `~/.local/share/sys-chronicle/anime_sync_history.json`. Tracks playback intervals, position, watch %, and MAL status badges. |
 | `src/mal/parser.rs` | `AnimeParser`, `AnimeInfo` | Offline regex title/episode/season extractor. Strips release group tags (`[SubsPlease]`), hashes, resolutions (`1080p`), and codecs. Handles diverse anime file naming conventions. |

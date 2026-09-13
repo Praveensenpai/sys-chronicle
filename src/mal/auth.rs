@@ -126,7 +126,7 @@ impl MalAuth {
             client_id,
             client_secret,
             gemini_api_key,
-            gemini_model: Some("gemini-3.5-flash-lite".to_string()),
+            gemini_model: Some("gemini-3.1-flash-lite".to_string()),
             access_token: token_resp.access_token,
             refresh_token: token_resp.refresh_token,
             expires_at,

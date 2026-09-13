@@ -86,7 +86,7 @@ fn matches_record(
     canonical_title: &str,
     episode: u32,
 ) -> bool {
-    if episode > 0 && r.episode > 0 && r.episode != episode {
+    if (episode > 0 || r.episode > 0) && r.episode != episode {
         return false;
     }
     if r.raw_title == raw_title {
@@ -105,7 +105,7 @@ fn matches_record(
     }
     let n1 = normalize_for_match(&r.canonical_title);
     let n2 = normalize_for_match(canonical_title);
-    !n1.is_empty() && n1 == n2
+    !n1.is_empty() && n1 == n2 && r.episode == episode
 }
 
 impl AnimeSyncHistory {
