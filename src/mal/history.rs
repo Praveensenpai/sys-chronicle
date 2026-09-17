@@ -19,18 +19,19 @@ pub enum SyncStatus {
 
 impl SyncStatus {
     pub fn badge(&self) -> (&'static str, ratatui::style::Color) {
+        use ratatui::style::Color::*;
         match self {
-            SyncStatus::Synced => ("✔ SYNCED", ratatui::style::Color::Green),
-            SyncStatus::AheadOnMal { .. } => ("⏩ MAL AHEAD", ratatui::style::Color::Cyan),
-            SyncStatus::ThresholdMet => ("⏳ PENDING", ratatui::style::Color::Yellow),
-            SyncStatus::Watching => ("▶ WATCHING", ratatui::style::Color::Blue),
-            SyncStatus::Failed { .. } => ("✖ FAILED", ratatui::style::Color::Red),
+            SyncStatus::Synced => ("✔ SYNCED", Green),
+            SyncStatus::AheadOnMal { .. } => ("⏩ MAL AHEAD", Cyan),
+            SyncStatus::ThresholdMet => ("⏳ PENDING", Yellow),
+            SyncStatus::Watching => ("▶ WATCHING", Blue),
+            SyncStatus::Failed { .. } => ("✖ FAILED", Red),
             SyncStatus::NonSyncable { reason } => match reason.as_str() {
-                "live_action" => ("🎬 LIVE-ACT", ratatui::style::Color::Magenta),
-                "special" => ("⭐ SPECIAL", ratatui::style::Color::Magenta),
-                "bonus" => ("🎁 BONUS", ratatui::style::Color::DarkGray),
-                "creditless" => ("🎵 NC OP/ED", ratatui::style::Color::DarkGray),
-                _ => ("🚫 NOT ANIME", ratatui::style::Color::DarkGray),
+                "live_action" => ("🎬 LIVE-ACT", Magenta),
+                "special" => ("⭐ SPECIAL", Magenta),
+                "bonus" => ("🎁 BONUS", DarkGray),
+                "creditless" => ("🎵 NC OP/ED", DarkGray),
+                _ => ("🚫 NOT ANIME", DarkGray),
             },
         }
     }
@@ -86,41 +87,114 @@ fn matches_record(
     canonical_title: &str,
     episode: u32,
 ) -> bool {
-    if (episode > 0 || r.episode > 0) && r.episode != episode {
-        return false;
-    }
-    if r.raw_title == raw_title {
+    if r.raw_title == raw_title || r.path.as_deref() == Some(raw_title) {
         return true;
     }
     let file_b = std::path::Path::new(raw_title).file_name();
-    if let (Some(a), Some(b)) = (std::path::Path::new(&r.raw_title).file_name(), file_b) {
-        if a == b {
-            return true;
-        }
+    let file_matches = file_b.is_some()
+        && (std::path::Path::new(&r.raw_title).file_name() == file_b
+            || r.path
+                .as_deref()
+                .map(std::path::Path::new)
+                .and_then(|p| p.file_name())
+                == file_b);
+    if file_matches {
+        return true;
     }
-    if let (Some(ref p), Some(b)) = (&r.path, file_b) {
-        if std::path::Path::new(p).file_name() == Some(b) {
-            return true;
-        }
+    if (episode > 0 || r.episode > 0) && r.episode != episode {
+        return false;
     }
     let n1 = normalize_for_match(&r.canonical_title);
     let n2 = normalize_for_match(canonical_title);
     !n1.is_empty() && n1 == n2 && r.episode == episode
 }
 
+fn compute_watch_pct(watched: u64, duration: u64, is_completed: bool) -> f32 {
+    if is_completed {
+        100.0
+    } else if duration > 0 {
+        (watched as f32 / duration as f32 * 100.0).min(100.0)
+    } else {
+        0.0
+    }
+}
+
+fn apply_record_progress(
+    r: &mut AnimeSyncRecord,
+    params: &ProgressUpdateParams<'_>,
+    effective_watched: u64,
+    non_sync_reason: Option<String>,
+) {
+    if !params.intervals.is_empty() {
+        r.intervals = crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
+            &r.intervals,
+            params.intervals,
+        );
+    }
+    let unique_secs = r
+        .intervals
+        .iter()
+        .map(|i| i.end.saturating_sub(i.start))
+        .sum::<u64>();
+    let watched = unique_secs.max(r.watched_secs).max(effective_watched);
+    r.watched_secs = watched;
+    r.duration_secs = params.duration_secs;
+    r.position_secs = params.position_secs.or(r.position_secs);
+
+    let is_comp = params.duration_secs > 0
+        && (watched >= params.duration_secs.saturating_sub(3)
+            || (watched as f64 / params.duration_secs as f64) >= 0.99);
+
+    r.watch_pct = compute_watch_pct(watched, params.duration_secs, is_comp);
+    r.last_updated = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    if let Some(reason) = non_sync_reason {
+        r.status = SyncStatus::NonSyncable { reason };
+        r.episode = 0;
+    } else if r.status == SyncStatus::Watching && r.watch_pct >= 80.0 {
+        r.status = SyncStatus::ThresholdMet;
+    }
+}
+
 impl AnimeSyncHistory {
     pub fn storage_path() -> PathBuf {
         #[cfg(test)]
-        {
-            std::env::temp_dir().join("sys_chronicle_test_anime_sync_history.json")
-        }
+        return std::env::temp_dir().join("sys_chronicle_test_anime_sync_history.json");
         #[cfg(not(test))]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-                .join("sys-chronicle")
-                .join("anime_sync_history.json")
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+            .join("sys-chronicle")
+            .join("anime_sync_history.json")
+    }
+
+    pub fn deduplicate(records: Vec<AnimeSyncRecord>) -> Vec<AnimeSyncRecord> {
+        let mut deduped: Vec<AnimeSyncRecord> = Vec::with_capacity(records.len());
+        for rec in records {
+            if let Some(existing) = deduped
+                .iter_mut()
+                .find(|r| matches_record(r, &rec.raw_title, &rec.canonical_title, rec.episode))
+            {
+                if rec.watch_pct > existing.watch_pct || rec.watched_secs > existing.watched_secs {
+                    existing.watch_pct = existing.watch_pct.max(rec.watch_pct);
+                    existing.watched_secs = existing.watched_secs.max(rec.watched_secs);
+                    existing.position_secs = rec.position_secs.or(existing.position_secs);
+                    existing.status = rec.status;
+                }
+                if !rec.intervals.is_empty() {
+                    existing.intervals =
+                        crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
+                            &existing.intervals,
+                            &rec.intervals,
+                        );
+                }
+                if rec.last_updated > existing.last_updated {
+                    existing.last_updated = rec.last_updated;
+                }
+            } else {
+                deduped.push(rec);
+            }
         }
+        deduped
     }
 
     pub fn load_all() -> Result<Vec<AnimeSyncRecord>> {
@@ -133,8 +207,9 @@ impl AnimeSyncHistory {
         if content.trim().is_empty() {
             return Ok(Vec::new());
         }
-        serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse JSON history from {:?}", path))
+        let records: Vec<AnimeSyncRecord> = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse JSON history from {:?}", path))?;
+        Ok(Self::deduplicate(records))
     }
 
     pub fn save_all(records: &[AnimeSyncRecord]) -> Result<()> {
@@ -174,16 +249,14 @@ impl AnimeSyncHistory {
         canonical_title: &str,
         episode: u32,
     ) -> Option<AnimeSyncRecord> {
-        let records = Self::load_all().ok()?;
-        records
+        Self::load_all()
+            .ok()?
             .into_iter()
             .find(|r| matches_record(r, raw_title, canonical_title, episode))
     }
 
     pub fn update_progress_full(params: ProgressUpdateParams<'_>) -> Result<()> {
         let mut records = Self::load_all().unwrap_or_default();
-        let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-
         let is_completed = params.duration_secs > 0
             && (params.watched_secs >= params.duration_secs.saturating_sub(3)
                 || (params.watched_secs as f64 / params.duration_secs as f64) >= 0.99);
@@ -193,73 +266,28 @@ impl AnimeSyncHistory {
             params.watched_secs
         };
 
+        let media_path = params.path.as_deref().unwrap_or(params.raw_title);
+        let classification = super::classifier::AnimeClassifier::check_local_heuristics(media_path);
+        let (canonical, episode, non_sync_reason) = match classification {
+            Some(super::classifier::MediaClassification::NonSyncable { title, reason, .. }) => {
+                (title, 0, Some(reason))
+            }
+            _ => (params.canonical_title.to_string(), params.episode, None),
+        };
+
         if let Some(r) = records
             .iter_mut()
-            .find(|r| matches_record(r, params.raw_title, params.canonical_title, params.episode))
+            .find(|r| matches_record(r, params.raw_title, &canonical, episode))
         {
-            if !params.intervals.is_empty() {
-                r.intervals =
-                    crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
-                        &r.intervals,
-                        params.intervals,
-                    );
-            }
-            let unique_secs = r
-                .intervals
-                .iter()
-                .map(|i| i.end.saturating_sub(i.start))
-                .sum::<u64>();
-            let watched = unique_secs.max(r.watched_secs).max(effective_watched);
-            r.watched_secs = watched;
-            r.duration_secs = params.duration_secs;
-            r.position_secs = params.position_secs.or(r.position_secs);
-
-            let is_comp = params.duration_secs > 0
-                && (watched >= params.duration_secs.saturating_sub(3)
-                    || (watched as f64 / params.duration_secs as f64) >= 0.99);
-
-            r.watch_pct = if is_comp {
-                100.0
-            } else if params.duration_secs > 0 {
-                (watched as f32 / params.duration_secs as f32 * 100.0).min(100.0)
-            } else {
-                0.0
-            };
-            r.last_updated = now;
-            if r.status == SyncStatus::Watching && r.watch_pct >= 80.0 {
-                r.status = SyncStatus::ThresholdMet;
-            }
+            apply_record_progress(r, &params, effective_watched, non_sync_reason);
         } else {
-            let actual_watched = effective_watched;
-            let watch_pct = if is_completed {
-                100.0
-            } else if params.duration_secs > 0 {
-                (actual_watched as f32 / params.duration_secs as f32 * 100.0).min(100.0)
-            } else {
-                0.0
+            let watch_pct =
+                compute_watch_pct(effective_watched, params.duration_secs, is_completed);
+            let status = match non_sync_reason {
+                Some(reason) => SyncStatus::NonSyncable { reason },
+                None if watch_pct >= 80.0 => SyncStatus::ThresholdMet,
+                None => SyncStatus::Watching,
             };
-            let (status, canonical, episode) =
-                if let Some(super::classifier::MediaClassification::NonSyncable {
-                    title,
-                    reason,
-                    ..
-                }) = super::classifier::AnimeClassifier::check_local_heuristics(
-                    params.path.as_deref().unwrap_or(params.raw_title),
-                ) {
-                    (SyncStatus::NonSyncable { reason }, title, 0)
-                } else if watch_pct >= 80.0 {
-                    (
-                        SyncStatus::ThresholdMet,
-                        params.canonical_title.to_string(),
-                        params.episode,
-                    )
-                } else {
-                    (
-                        SyncStatus::Watching,
-                        params.canonical_title.to_string(),
-                        params.episode,
-                    )
-                };
             records.insert(
                 0,
                 AnimeSyncRecord {
@@ -268,14 +296,14 @@ impl AnimeSyncHistory {
                     episode,
                     path: params.path,
                     duration_secs: params.duration_secs,
-                    watched_secs: actual_watched,
+                    watched_secs: effective_watched,
                     position_secs: params.position_secs,
                     watch_pct,
                     mal_anime_id: None,
                     mal_current_ep: None,
                     mal_total_episodes: None,
                     status,
-                    last_updated: now,
+                    last_updated: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                     intervals: params.intervals.to_vec(),
                 },
             );
@@ -306,75 +334,4 @@ impl AnimeSyncHistory {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sync_status_badge() {
-        let synced = SyncStatus::Synced;
-        assert_eq!(synced.badge().0, "✔ SYNCED");
-
-        let ahead = SyncStatus::AheadOnMal { mal_episode: 6 };
-        assert_eq!(ahead.badge().0, "⏩ MAL AHEAD");
-    }
-
-    #[test]
-    fn test_anime_record_serialization() {
-        let record = AnimeSyncRecord {
-            raw_title: "[SubsPlease] Sousou no Frieren - 04 (1080p).mkv".into(),
-            canonical_title: "Sousou no Frieren".into(),
-            episode: 4,
-            path: None,
-            duration_secs: 1440,
-            watched_secs: 1200,
-            watch_pct: 83.3,
-            mal_anime_id: Some(52991),
-            mal_current_ep: Some(6),
-            mal_total_episodes: Some(28),
-            position_secs: Some(1200),
-            status: SyncStatus::AheadOnMal { mal_episode: 6 },
-            last_updated: "2026-09-07 16:40:00".into(),
-            intervals: vec![PlaybackInterval {
-                start: 0,
-                end: 1200,
-            }],
-        };
-
-        let json = serde_json::to_string(&record).expect("Failed to serialize");
-        let parsed: AnimeSyncRecord = serde_json::from_str(&json).expect("Failed to deserialize");
-        assert_eq!(parsed.canonical_title, "Sousou no Frieren");
-        assert_eq!(parsed.episode, 4);
-        assert_eq!(parsed.position_secs, Some(1200));
-        assert_eq!(parsed.intervals.len(), 1);
-        assert_eq!(parsed.status, SyncStatus::AheadOnMal { mal_episode: 6 });
-    }
-
-    #[test]
-    fn test_update_progress_monotonic_watched_secs() {
-        let raw = "Test Anime - 01.mkv";
-        let title = "Test Anime";
-        let ep = 1;
-
-        // First watch 15 seconds
-        AnimeSyncHistory::update_progress(raw, title, ep, None, 1000, 15).expect("updated");
-        let r1 = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
-        assert_eq!(r1.watched_secs, 15);
-
-        // User seeks back to 1 second
-        AnimeSyncHistory::update_progress_full(ProgressUpdateParams {
-            raw_title: raw,
-            canonical_title: title,
-            episode: ep,
-            path: None,
-            duration_secs: 1000,
-            watched_secs: 1,
-            position_secs: Some(1),
-            intervals: &[],
-        })
-        .expect("updated");
-        let r2 = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
-        // Watched duration MUST NOT DECREASE to 1; it must stay at 15
-        assert_eq!(r2.watched_secs, 15);
-        assert_eq!(r2.position_secs, Some(1));
-    }
-}
+mod tests;

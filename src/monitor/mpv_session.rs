@@ -72,13 +72,7 @@ impl MpvPlaybackSession {
         self.tracker.set_media(&self.title, None);
 
         let raw = self.path.as_deref().unwrap_or(&self.title);
-        if let Some(info) = AnimeParser::parse(raw) {
-            if let Some(existing) = AnimeSyncHistory::find_record(raw, &info.title, info.episode) {
-                if existing.episode == info.episode && !existing.intervals.is_empty() {
-                    self.tracker.load_intervals(&existing.intervals);
-                }
-            }
-        }
+        try_load_existing_intervals(&mut self.tracker, raw, &self.title);
 
         monitor.log_media_event(
             "start",
@@ -119,15 +113,7 @@ impl MpvPlaybackSession {
         if !self.title.is_empty() && (self.title == file_name || self.path.is_none()) {
             self.path = Some(new_path_str.clone());
             if self.tracker.intervals().is_empty() {
-                if let Some(info) = AnimeParser::parse(&new_path_str) {
-                    if let Some(existing) =
-                        AnimeSyncHistory::find_record(&new_path_str, &info.title, info.episode)
-                    {
-                        if existing.episode == info.episode && !existing.intervals.is_empty() {
-                            self.tracker.load_intervals(&existing.intervals);
-                        }
-                    }
-                }
+                try_load_existing_intervals(&mut self.tracker, &new_path_str, &self.title);
             }
             self.sync_history();
         } else {
@@ -225,20 +211,45 @@ impl MpvPlaybackSession {
 
     pub fn sync_history_progress(params: MpvProgressParams<'_>) {
         let raw = params.path.unwrap_or(params.title);
-        if let Some(info) = AnimeParser::parse(raw) {
-            let duration = params.duration_secs.unwrap_or(0);
-            if duration > 0 {
-                let _ = AnimeSyncHistory::update_progress_full(ProgressUpdateParams {
-                    raw_title: raw,
-                    canonical_title: &info.title,
-                    episode: info.episode,
-                    path: params.path.map(|s| s.to_string()),
-                    duration_secs: duration,
-                    watched_secs: params.watched_secs,
-                    position_secs: Some(params.position_secs),
-                    intervals: params.intervals,
-                });
-            }
+        let duration = params.duration_secs.unwrap_or(0);
+        if duration == 0 {
+            return;
+        }
+        let (canonical, episode) = resolve_media_info(raw, params.title);
+        let _ = AnimeSyncHistory::update_progress_full(ProgressUpdateParams {
+            raw_title: raw,
+            canonical_title: &canonical,
+            episode,
+            path: params.path.map(|s| s.to_string()),
+            duration_secs: duration,
+            watched_secs: params.watched_secs,
+            position_secs: Some(params.position_secs),
+            intervals: params.intervals,
+        });
+    }
+}
+
+fn resolve_media_info(raw: &str, fallback_title: &str) -> (String, u32) {
+    if let Some(crate::mal::classifier::MediaClassification::NonSyncable { title, .. }) =
+        crate::mal::classifier::AnimeClassifier::check_local_heuristics(raw)
+    {
+        (title, 0)
+    } else if let Some(info) = AnimeParser::parse(raw) {
+        (info.title, info.episode)
+    } else {
+        (fallback_title.to_string(), 0)
+    }
+}
+
+fn try_load_existing_intervals(
+    tracker: &mut UniqueTimelineTracker,
+    raw: &str,
+    fallback_title: &str,
+) {
+    let (title, episode) = resolve_media_info(raw, fallback_title);
+    if let Some(existing) = AnimeSyncHistory::find_record(raw, &title, episode) {
+        if !existing.intervals.is_empty() {
+            tracker.load_intervals(&existing.intervals);
         }
     }
 }
