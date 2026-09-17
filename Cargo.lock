@@ -1513,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "sys-chronicle"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "anyhow",
  "base64",
