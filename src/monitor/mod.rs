@@ -2,6 +2,7 @@ pub mod metrics;
 pub mod mpv;
 pub mod mpv_session;
 pub mod power;
+pub mod process;
 pub mod timeline_tracker;
 pub mod window;
 

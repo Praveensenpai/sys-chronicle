@@ -415,6 +415,7 @@ pub fn run_status_tui() -> Result<()> {
             sorted_apps.retain(|app| {
                 app.name.to_lowercase().contains(&query)
                     || app.exe_path.to_lowercase().contains(&query)
+                    || app.cmdline.to_lowercase().contains(&query)
             });
         }
 
@@ -774,7 +775,7 @@ pub fn run_status_tui() -> Result<()> {
 
                     // App Inspector Card (Right)
                     let inspector_lines = if let Some(selected_app) = visible_apps.get(selected_idx) {
-                        vec![
+                        let mut lines = vec![
                             Line::from(vec![
                                 Span::styled("App Name: ", Style::default().fg(Color::Gray)),
                                 Span::styled(&selected_app.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
@@ -783,6 +784,14 @@ pub fn run_status_tui() -> Result<()> {
                                 Span::styled("Path: ", Style::default().fg(Color::Gray)),
                                 Span::styled(&selected_app.exe_path, Style::default().fg(Color::DarkGray)),
                             ]),
+                        ];
+                        if !selected_app.cmdline.is_empty() {
+                            lines.push(Line::from(vec![
+                                Span::styled("Command: ", Style::default().fg(Color::Gray)),
+                                Span::styled(truncate_name(&selected_app.cmdline, 75), Style::default().fg(Color::White)),
+                            ]));
+                        }
+                        lines.extend(vec![
                             Line::from(vec![
                                 Span::styled("Instances: ", Style::default().fg(Color::Gray)),
                                 Span::styled(format!("{} processes", selected_app.process_count), Style::default().fg(Color::Magenta)),
@@ -795,7 +804,8 @@ pub fn run_status_tui() -> Result<()> {
                                 Span::styled("App CPU Load: ", Style::default().fg(Color::Gray)),
                                 Span::styled(format!("{:.1}%", selected_app.cpu_pct), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                             ]),
-                        ]
+                        ]);
+                        lines
                     } else {
                         vec![Line::from(Span::raw("No process matches filter"))]
                     };
@@ -1468,20 +1478,8 @@ fn kill_app_processes(sys: &mut System, target: &AppDetail) -> usize {
     let mut killed = 0;
 
     for p in sys.processes().values() {
-        let clean_name = p
-            .exe()
-            .and_then(|e| e.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| p.name().to_string());
-
-        let raw_exe_path = p
-            .exe()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let matches_name = clean_name == target.name;
-        let matches_path = !target.exe_path.is_empty() && raw_exe_path == target.exe_path;
-        if (matches_name || matches_path) && p.kill() {
+        let (resolved_name, _, _) = crate::monitor::process::resolve_process_identity(p);
+        if resolved_name == target.name && p.kill() {
             killed += 1;
         }
     }
