@@ -83,3 +83,46 @@ fn test_update_progress_monotonic_watched_secs() {
         15
     );
 }
+
+#[test]
+fn test_upsert_does_not_regress_watched_progress() {
+    use crate::monitor::timeline_tracker::PlaybackInterval;
+    let raw = "Non Non Biyori - S01E08 [1080p].mkv";
+    let title = "Non Non Biyori";
+    let ep = 8;
+
+    // Simulate a fully-watched record (written by the threshold handler)
+    let mut full = sample(ep, 1437, 1437);
+    full.raw_title = raw.into();
+    full.canonical_title = title.into();
+    full.watch_pct = 100.0;
+    full.status = SyncStatus::ThresholdMet;
+    full.intervals = vec![PlaybackInterval { start: 0, end: 1437 }];
+    AnimeSyncHistory::upsert(full).expect("upsert full");
+
+    // Simulate briefly re-opening the episode and upsert being called again
+    let mut brief = sample(ep, 16, 1437);
+    brief.raw_title = raw.into();
+    brief.canonical_title = title.into();
+    brief.watch_pct = 1.1;
+    brief.status = SyncStatus::Watching;
+    brief.intervals = vec![PlaybackInterval { start: 118, end: 134 }];
+    AnimeSyncHistory::upsert(brief).expect("upsert brief");
+
+    let record = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
+    assert!(
+        record.watched_secs >= 1437,
+        "watched_secs must not regress: got {}",
+        record.watched_secs
+    );
+    assert!(
+        record.watch_pct >= 100.0,
+        "watch_pct must not regress: got {}",
+        record.watch_pct
+    );
+    assert_eq!(
+        record.status,
+        SyncStatus::ThresholdMet,
+        "status must not regress to Watching"
+    );
+}

@@ -156,6 +156,19 @@ fn apply_record_progress(
     }
 }
 
+fn higher_status(a: SyncStatus, b: SyncStatus) -> SyncStatus {
+    fn rank(s: &SyncStatus) -> u8 {
+        match s {
+            SyncStatus::Synced => 4,
+            SyncStatus::AheadOnMal { .. } => 3,
+            SyncStatus::ThresholdMet => 2,
+            SyncStatus::Watching => 1,
+            SyncStatus::Failed { .. } | SyncStatus::NonSyncable { .. } => 0,
+        }
+    }
+    if rank(&b) > rank(&a) { b } else { a }
+}
+
 impl AnimeSyncHistory {
     pub fn storage_path() -> PathBuf {
         #[cfg(test)]
@@ -237,7 +250,30 @@ impl AnimeSyncHistory {
                 record.episode,
             )
         }) {
-            records[idx] = record;
+            let existing = &mut records[idx];
+            if !record.intervals.is_empty() {
+                existing.intervals =
+                    crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
+                        &existing.intervals,
+                        &record.intervals,
+                    );
+            }
+            let unique_secs: u64 = existing
+                .intervals
+                .iter()
+                .map(|i| i.end.saturating_sub(i.start))
+                .sum();
+            existing.watched_secs = unique_secs
+                .max(existing.watched_secs)
+                .max(record.watched_secs);
+            existing.duration_secs = record.duration_secs;
+            existing.position_secs = record.position_secs.or(existing.position_secs);
+            existing.watch_pct = existing.watch_pct.max(record.watch_pct);
+            existing.last_updated = record.last_updated;
+            existing.mal_anime_id = record.mal_anime_id.or(existing.mal_anime_id);
+            existing.mal_current_ep = record.mal_current_ep.or(existing.mal_current_ep);
+            existing.mal_total_episodes = record.mal_total_episodes.or(existing.mal_total_episodes);
+            existing.status = higher_status(existing.status.clone(), record.status);
         } else {
             records.insert(0, record);
         }
