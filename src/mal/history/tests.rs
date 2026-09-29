@@ -165,3 +165,58 @@ fn test_reopen_synced_episode_does_not_regress_status_or_pct() {
     assert_eq!(record.status, SyncStatus::Synced);
 }
 
+#[test]
+fn test_reconcile_and_sort_episodes_from_start_to_finish() {
+    let mut ep8 = sample(8, 6, 1422);
+    ep8.raw_title = "Yuru Camp - S02E08.mkv".into();
+    ep8.canonical_title = "Yuru Camp".into();
+    ep8.last_updated = "2026-09-29 16:53:35".into();
+
+    let mut ep7 = sample(7, 1342, 1422);
+    ep7.raw_title = "Yuru Camp - S02E07.mkv".into();
+    ep7.canonical_title = "Yuru Camp".into();
+    ep7.status = SyncStatus::Synced;
+    ep7.mal_anime_id = Some(38474);
+    ep7.mal_current_ep = Some(7);
+    ep7.mal_total_episodes = Some(13);
+    ep7.last_updated = "2026-09-29 16:52:52".into();
+
+    let mut ep5 = sample(5, 6, 1422);
+    ep5.raw_title = "Yuru Camp - S02E05.mkv".into();
+    ep5.canonical_title = "Yuru Camp".into();
+    ep5.status = SyncStatus::Watching;
+    ep5.last_updated = "2026-09-29 15:48:51".into();
+
+    let mut ep6 = sample(6, 1347, 1422);
+    ep6.raw_title = "Yuru Camp - S02E06.mkv".into();
+    ep6.canonical_title = "Yuru Camp".into();
+    ep6.status = SyncStatus::Synced;
+    ep6.mal_anime_id = Some(38474);
+    ep6.mal_current_ep = Some(6);
+    ep6.mal_total_episodes = Some(13);
+    ep6.last_updated = "2026-09-29 16:23:05".into();
+
+    // Input in arbitrary order: 8, 7, 5, 6
+    let records = vec![ep8, ep7, ep5, ep6];
+    let reconciled = AnimeSyncHistory::deduplicate(records);
+
+    // Verify sorted from start to finish: 5, 6, 7, 8
+    assert_eq!(reconciled.len(), 4);
+    assert_eq!(reconciled[0].episode, 5);
+    assert_eq!(reconciled[1].episode, 6);
+    assert_eq!(reconciled[2].episode, 7);
+    assert_eq!(reconciled[3].episode, 8);
+
+    // Ep 5 should be reconciled as Synced because Ep 7 is Synced on MAL
+    assert_eq!(reconciled[0].status, SyncStatus::Synced);
+    assert_eq!(reconciled[0].watch_pct, 100.0);
+    assert_eq!(reconciled[0].mal_anime_id, Some(38474));
+    assert_eq!(reconciled[0].mal_total_episodes, Some(13));
+
+    // Ep 8 should inherit mal_anime_id and mal_total_episodes, but stay Watching
+    assert_eq!(reconciled[3].status, SyncStatus::Watching);
+    assert_eq!(reconciled[3].mal_anime_id, Some(38474));
+    assert_eq!(reconciled[3].mal_total_episodes, Some(13));
+}
+
+

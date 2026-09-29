@@ -217,6 +217,76 @@ impl AnimeSyncHistory {
                 deduped.push(rec);
             }
         }
+
+        // Reconcile MAL progress and metadata across episodes of the same anime
+        let mut anime_metadata: std::collections::HashMap<String, (Option<u64>, Option<u32>, Option<u32>)> =
+            std::collections::HashMap::new();
+
+        for r in &deduped {
+            let key = r.canonical_title.trim().to_lowercase();
+            let entry = anime_metadata.entry(key).or_insert((None, None, None));
+            if r.mal_anime_id.is_some() && entry.0.is_none() {
+                entry.0 = r.mal_anime_id;
+            }
+            if let Some(cur) = r.mal_current_ep {
+                entry.1 = Some(entry.1.unwrap_or(0).max(cur));
+            }
+            if r.status == SyncStatus::Synced {
+                entry.1 = Some(entry.1.unwrap_or(0).max(r.episode));
+            }
+            if r.mal_total_episodes.is_some() && entry.2.is_none() {
+                entry.2 = r.mal_total_episodes;
+            }
+        }
+
+        for r in &mut deduped {
+            let key = r.canonical_title.trim().to_lowercase();
+            if let Some(&(mal_id, max_synced_ep, total_eps)) = anime_metadata.get(&key) {
+                r.mal_anime_id = r.mal_anime_id.or(mal_id);
+                r.mal_total_episodes = r.mal_total_episodes.or(total_eps);
+                r.mal_current_ep = r.mal_current_ep.or(max_synced_ep);
+
+                if let Some(max_ep) = max_synced_ep {
+                    if r.episode > 0 && r.episode <= max_ep && r.status == SyncStatus::Watching {
+                        r.status = SyncStatus::Synced;
+                        if r.duration_secs > 0 {
+                            r.watched_secs = r.watched_secs.max(r.duration_secs);
+                            r.watch_pct = r.watch_pct.max(100.0);
+                            if r.intervals.is_empty() {
+                                r.intervals = vec![crate::monitor::timeline_tracker::PlaybackInterval {
+                                    start: 0,
+                                    end: r.duration_secs,
+                                }];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort records: anime with newest activity first, and within each anime, episodes from start to finish
+        let mut anime_latest: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for r in &deduped {
+            let key = r.canonical_title.trim().to_lowercase();
+            let latest = anime_latest.entry(key).or_default();
+            if r.last_updated > *latest {
+                *latest = r.last_updated.clone();
+            }
+        }
+
+        deduped.sort_by(|a, b| {
+            let key_a = a.canonical_title.trim().to_lowercase();
+            let key_b = b.canonical_title.trim().to_lowercase();
+            let time_a = anime_latest.get(&key_a);
+            let time_b = anime_latest.get(&key_b);
+
+            time_b
+                .cmp(&time_a)
+                .then_with(|| a.canonical_title.cmp(&b.canonical_title))
+                .then_with(|| a.episode.cmp(&b.episode))
+        });
+
         deduped
     }
 
