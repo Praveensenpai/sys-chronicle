@@ -819,14 +819,27 @@ pub fn run_status_tui() -> Result<()> {
                     let analytics_items: Vec<ListItem> = if cached_analytics.is_empty() {
                         vec![ListItem::new(Span::styled("  No screen time logged yet for today", Style::default().fg(Color::DarkGray)))]
                     } else {
+                        let avail_width = chunks[3].width.saturating_sub(4) as usize;
+                        let max_len = cached_analytics
+                            .iter()
+                            .map(|e| e.app_name.chars().count())
+                            .max()
+                            .unwrap_or(25);
+                        let max_allowed = avail_width.saturating_sub(18).max(25);
+                        let name_width = max_len.clamp(25, max_allowed);
+
                         cached_analytics
                             .iter()
                             .enumerate()
                             .map(|(idx, entry)| {
                                 let formatted_time = format_screen_time(entry.total_seconds);
+                                let display_name = truncate_name(&entry.app_name, name_width);
                                 ListItem::new(Line::from(vec![
                                     Span::styled(format!(" #{:<2} ", idx + 1), Style::default().fg(Color::DarkGray)),
-                                    Span::styled(format!("{:<25}", entry.app_name), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                                    Span::styled(
+                                        format!("{:<width$}  ", display_name, width = name_width),
+                                        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                                    ),
                                     Span::styled(formatted_time, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                                 ]))
                             })

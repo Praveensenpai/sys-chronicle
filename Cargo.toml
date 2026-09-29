@@ -1,6 +1,6 @@
 [package]
 name = "sys-chronicle"
-version = "0.5.12"
+version = "0.5.13"
 edition = "2021"
 authors = ["Praveensenpai"]
 description = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"

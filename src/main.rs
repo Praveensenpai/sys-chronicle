@@ -9,6 +9,7 @@ mod tui;
 use anyhow::Result;
 use chrono::Local;
 use clap::{ArgAction, Parser, Subcommand};
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use sysinfo::System;
@@ -31,7 +32,7 @@ struct Cli {
     #[arg(short = 'v', long, visible_short_alias = 'V', action = ArgAction::Version)]
     version: (),
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -73,8 +74,11 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let command = cli.command.unwrap_or(Commands::Status {
+        plain: !std::io::stdout().is_terminal(),
+    });
 
-    match cli.command {
+    match command {
         Commands::Daemon { interval } => {
             println!(
                 "[sys-chronicle daemon v{} starting]",
@@ -195,3 +199,21 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_defaults_to_none_subcommand() {
+        let cli = Cli::try_parse_from(["sys-chronicle"]).expect("parse without args");
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn test_cli_explicit_status_subcommand() {
+        let cli = Cli::try_parse_from(["sys-chronicle", "status"]).expect("parse status");
+        assert!(matches!(cli.command, Some(Commands::Status { plain: false })));
+    }
+}
+
