@@ -126,3 +126,42 @@ fn test_upsert_does_not_regress_watched_progress() {
         "status must not regress to Watching"
     );
 }
+
+#[test]
+fn test_reopen_synced_episode_does_not_regress_status_or_pct() {
+    use crate::monitor::timeline_tracker::PlaybackInterval;
+    let raw = "Yuru Camp - S01E05 [1080p].mkv";
+    let title = "Yuru Camp";
+    let ep = 5;
+
+    // Simulate already synced record
+    let mut synced = sample(ep, 1422, 1422);
+    synced.raw_title = raw.into();
+    synced.canonical_title = title.into();
+    synced.watch_pct = 100.0;
+    synced.status = SyncStatus::Synced;
+    synced.intervals = vec![PlaybackInterval { start: 0, end: 1422 }];
+    AnimeSyncHistory::upsert(synced).expect("upsert synced");
+
+    // Simulate reopening and playing only 6 seconds
+    AnimeSyncHistory::update_progress_full(ProgressUpdateParams {
+        raw_title: raw,
+        canonical_title: title,
+        episode: ep,
+        path: None,
+        duration_secs: 1422,
+        watched_secs: 6,
+        position_secs: Some(1422),
+        intervals: &[PlaybackInterval {
+            start: 1416,
+            end: 1422,
+        }],
+    })
+    .expect("update progress full");
+
+    let record = AnimeSyncHistory::find_record(raw, title, ep).expect("found");
+    assert_eq!(record.watched_secs, 1422);
+    assert_eq!(record.watch_pct, 100.0);
+    assert_eq!(record.status, SyncStatus::Synced);
+}
+

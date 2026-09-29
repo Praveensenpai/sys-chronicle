@@ -138,21 +138,29 @@ fn apply_record_progress(
         .sum::<u64>();
     let watched = unique_secs.max(r.watched_secs).max(effective_watched);
     r.watched_secs = watched;
-    r.duration_secs = params.duration_secs;
+    if params.duration_secs > 0 {
+        r.duration_secs = params.duration_secs;
+    }
     r.position_secs = params.position_secs.or(r.position_secs);
 
-    let is_comp = params.duration_secs > 0
-        && (watched >= params.duration_secs.saturating_sub(3)
-            || (watched as f64 / params.duration_secs as f64) >= 0.99);
+    let is_comp = r.duration_secs > 0
+        && (watched >= r.duration_secs.saturating_sub(3)
+            || (watched as f64 / r.duration_secs as f64) >= 0.99);
 
-    r.watch_pct = compute_watch_pct(watched, params.duration_secs, is_comp);
+    let new_pct = compute_watch_pct(watched, r.duration_secs, is_comp);
+    r.watch_pct = r.watch_pct.max(new_pct);
     r.last_updated = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     if let Some(reason) = non_sync_reason {
         r.status = SyncStatus::NonSyncable { reason };
         r.episode = 0;
-    } else if r.status == SyncStatus::Watching && r.watch_pct >= 80.0 {
-        r.status = SyncStatus::ThresholdMet;
+    } else {
+        let new_status = if r.watch_pct >= 80.0 {
+            SyncStatus::ThresholdMet
+        } else {
+            SyncStatus::Watching
+        };
+        r.status = higher_status(r.status.clone(), new_status);
     }
 }
 
@@ -187,12 +195,14 @@ impl AnimeSyncHistory {
                 .iter_mut()
                 .find(|r| matches_record(r, &rec.raw_title, &rec.canonical_title, rec.episode))
             {
-                if rec.watch_pct > existing.watch_pct || rec.watched_secs > existing.watched_secs {
-                    existing.watch_pct = existing.watch_pct.max(rec.watch_pct);
-                    existing.watched_secs = existing.watched_secs.max(rec.watched_secs);
-                    existing.position_secs = rec.position_secs.or(existing.position_secs);
-                    existing.status = rec.status;
-                }
+                existing.watch_pct = existing.watch_pct.max(rec.watch_pct);
+                existing.watched_secs = existing.watched_secs.max(rec.watched_secs);
+                existing.position_secs = rec.position_secs.or(existing.position_secs);
+                existing.status = higher_status(existing.status.clone(), rec.status);
+                existing.mal_anime_id = existing.mal_anime_id.or(rec.mal_anime_id);
+                existing.mal_current_ep = existing.mal_current_ep.or(rec.mal_current_ep);
+                existing.mal_total_episodes = existing.mal_total_episodes.or(rec.mal_total_episodes);
+
                 if !rec.intervals.is_empty() {
                     existing.intervals =
                         crate::monitor::timeline_tracker::UniqueTimelineTracker::merge_interval_lists(
@@ -231,12 +241,17 @@ impl AnimeSyncHistory {
             create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(records)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)?;
-        file.write_all(content.as_bytes())?;
+        let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+        {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
 

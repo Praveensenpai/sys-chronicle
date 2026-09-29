@@ -51,6 +51,13 @@ impl UniqueTimelineTracker {
 
     pub fn load_intervals(&mut self, intervals: &[PlaybackInterval]) {
         self.intervals = Self::merge_interval_lists(&self.intervals, intervals);
+        if self.coverage_pct() >= 80.0 {
+            self.threshold_triggered = true;
+        }
+    }
+
+    pub fn set_threshold_triggered(&mut self, triggered: bool) {
+        self.threshold_triggered = triggered;
     }
 
     pub fn set_media(&mut self, media_key: &str, duration: Option<u64>) {

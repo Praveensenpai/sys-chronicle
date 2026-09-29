@@ -2,7 +2,7 @@ use chrono::Local;
 use std::path::Path;
 
 use crate::mal::history::ProgressUpdateParams;
-use crate::mal::{AnimeParser, AnimeSyncHistory};
+use crate::mal::{AnimeParser, AnimeSyncHistory, SyncStatus};
 use crate::monitor::mpv::MpvMonitor;
 use crate::monitor::timeline_tracker::{PlaybackInterval, UniqueTimelineTracker};
 
@@ -112,9 +112,7 @@ impl MpvPlaybackSession {
 
         if !self.title.is_empty() && (self.title == file_name || self.path.is_none()) {
             self.path = Some(new_path_str.clone());
-            if self.tracker.intervals().is_empty() {
-                try_load_existing_intervals(&mut self.tracker, &new_path_str, &self.title);
-            }
+            try_load_existing_intervals(&mut self.tracker, &new_path_str, &self.title);
             self.sync_history();
         } else {
             let title = if file_name.is_empty() {
@@ -250,6 +248,21 @@ fn try_load_existing_intervals(
     if let Some(existing) = AnimeSyncHistory::find_record(raw, &title, episode) {
         if !existing.intervals.is_empty() {
             tracker.load_intervals(&existing.intervals);
+        } else if existing.watched_secs > 0 && existing.duration_secs > 0 {
+            tracker.load_intervals(&[PlaybackInterval {
+                start: 0,
+                end: existing.watched_secs.min(existing.duration_secs),
+            }]);
+        }
+        if existing.watch_pct >= 80.0
+            || matches!(
+                existing.status,
+                SyncStatus::Synced
+                    | SyncStatus::AheadOnMal { .. }
+                    | SyncStatus::ThresholdMet
+            )
+        {
+            tracker.set_threshold_triggered(true);
         }
     }
 }

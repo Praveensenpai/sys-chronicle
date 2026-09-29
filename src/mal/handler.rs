@@ -70,18 +70,20 @@ impl MalHandler {
                         } else {
                             (title.clone(), 0)
                         };
-                    let _ = AnimeSyncHistory::update_progress_full(
-                        crate::mal::history::ProgressUpdateParams {
-                            raw_title: &raw_media,
-                            canonical_title: &canonical,
-                            episode: ep,
-                            path,
-                            duration_secs: duration,
-                            watched_secs: 0,
-                            position_secs: Some(position_secs),
-                            intervals: &[],
-                        },
-                    );
+                    if AnimeSyncHistory::find_record(&raw_media, &canonical, ep).is_some() {
+                        let _ = AnimeSyncHistory::update_progress_full(
+                            crate::mal::history::ProgressUpdateParams {
+                                raw_title: &raw_media,
+                                canonical_title: &canonical,
+                                episode: ep,
+                                path,
+                                duration_secs: duration,
+                                watched_secs: 0,
+                                position_secs: Some(position_secs),
+                                intervals: &[],
+                            },
+                        );
+                    }
                 }
             }
             _ => {}
