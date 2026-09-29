@@ -219,4 +219,50 @@ fn test_reconcile_and_sort_episodes_from_start_to_finish() {
     assert_eq!(reconciled[3].mal_total_episodes, Some(13));
 }
 
+#[test]
+fn test_reconcile_real_user_history_file() {
+    let path = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+        .join("sys-chronicle")
+        .join("anime_sync_history.json");
+
+    if !path.exists() {
+        return;
+    }
+
+    let content = std::fs::read_to_string(&path).expect("read real file");
+    let records: Vec<AnimeSyncRecord> = serde_json::from_str(&content).expect("parse real records");
+    let result = AnimeSyncHistory::deduplicate(records);
+
+    println!("--- Reconciled Output from Real User History File ---");
+    for (i, r) in result.iter().enumerate() {
+        println!(
+            "#{:02} {} Ep {:<2} {:>5.1}% [{}] mal_id={:?}",
+            i + 1,
+            r.canonical_title,
+            r.episode,
+            r.watch_pct,
+            r.status.badge().0,
+            r.mal_anime_id
+        );
+    }
+
+    assert_eq!(result.len(), 4);
+    assert_eq!(result[0].episode, 5);
+    assert_eq!(result[0].status, SyncStatus::Synced);
+    assert_eq!(result[0].watch_pct, 100.0);
+    assert_eq!(result[0].mal_anime_id, Some(38474));
+
+    assert_eq!(result[1].episode, 6);
+    assert_eq!(result[1].status, SyncStatus::Synced);
+
+    assert_eq!(result[2].episode, 7);
+    assert_eq!(result[2].status, SyncStatus::Synced);
+
+    assert_eq!(result[3].episode, 8);
+    assert_eq!(result[3].status, SyncStatus::Watching);
+    assert_eq!(result[3].mal_total_episodes, Some(13));
+}
+
+
 
