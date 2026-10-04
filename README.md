@@ -177,22 +177,48 @@ Total Unique Watched: 19 mins / 24 mins = 79.1% (Pending...)
 
 ### Scrobbler Features
 - 🔑 **Official MAL API v2 with PKCE OAuth2**: Secure interactive browser login with zero secret leaking.
-- 🧠 **Hybrid Gemini Flash-Lite AI + Regex Parser**: Uses Google's Gemini Flash-Lite (`gemini-3.1-flash-lite`) to parse convoluted release group titles (`[SubsPlease] Sousou no Frieren - 04 (1080p).mkv` ➔ Canonical Title: *"Sousou no Frieren"*, Ep `4`). Automatically falls back to an offline regex parser if a Gemini API key is not configured.
+- 🧠 **Dual-Tier AI + Regex Parser**:
+  - **Primary**: **DeepSeek** (`http://mochi:4000/v1/chat/completions`, model `v4.1flash`) for zero-quota local/network title extraction and season normalization.
+  - **Secondary Fallback**: **Google Gemini** (`gemini-3.1-flash-lite`) if DeepSeek is disabled or unreachable.
+  - **Tertiary Fallback**: Offline deterministic regex parser if neither AI endpoint is available.
 - 📊 **Dedicated 3rd TUI Tab**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[▶ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[🎬 LIVE-ACT]`).
 - 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes from overwriting higher progress already recorded on MyAnimeList.
 - ⚡ **Manual & Force Sync**: Instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.
 - 🔔 **Desktop Notifications**: Sends desktop alerts via `notify-send` when an episode is updated.
 
-### Setup & Commands
+### AI Configuration & Commands
 
+You can configure the AI provider via `~/.config/sys-chronicle/mal_config.json`, environment variables, or CLI:
+
+```json
+{
+  "client_id": "...",
+  "deepseek_url": "http://mochi:4000/v1/chat/completions",
+  "deepseek_model": "v4.1flash",
+  "deepseek_api_key": "dseeker",
+  "enable_deepseek": true,
+  "gemini_api_key": "AIzaSy...",
+  "gemini_model": "gemini-3.1-flash-lite"
+}
+```
+
+Environment variables:
+- `export DEEPSEEK_URL="http://mochi:4000/v1/chat/completions"`
+- `export DEEPSEEK_MODEL="v4.1flash"`
+- `export DEEPSEEK_API_KEY="dseeker"`
+- `export ENABLE_DEEPSEEK="true"`
+- `export GEMINI_API_KEY="AIzaSy..."`
+- `export GEMINI_MODEL="gemini-3.1-flash-lite"`
+
+CLI commands:
 ```bash
-# 1. Connect your MyAnimeList account (and optionally provide Gemini API Key)
+# 1. Connect your MyAnimeList account (prompts for MAL credentials and optional Gemini fallback key)
 sys-chronicle-mal login
 
-# 2. Check connection health and profile status
+# 2. Check connection health, active AI provider, and profile status
 sys-chronicle-mal status
 
-# 3. Test anime parsing on any video filename
+# 3. Test anime parsing on any video filename (verifies DeepSeek/Gemini parsing pipeline)
 sys-chronicle-mal test "[SubsPlease] Sousou no Frieren - 04 (1080p) [9A1B2C3D].mkv"
 
 # 4. Manually sync an anime title (with optional --force to overwrite MAL)

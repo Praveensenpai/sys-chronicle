@@ -87,8 +87,12 @@ struct GeminiParsedAnime {
 }
 
 pub struct GeminiParser {
-    api_key: String,
-    model: String,
+    gemini_api_key: Option<String>,
+    gemini_model: String,
+    deepseek_url: String,
+    deepseek_model: String,
+    deepseek_api_key: String,
+    enable_deepseek: bool,
     client: Client,
 }
 
@@ -99,26 +103,100 @@ impl GeminiParser {
             .unwrap_or_else(|| "gemini-3.1-flash-lite".to_string());
 
         let client = Client::builder()
-            .timeout(Duration::from_secs(6))
+            .timeout(Duration::from_secs(10))
             .build()
             .context("Failed to build HTTP client for Gemini")?;
 
         Ok(Self {
-            api_key,
-            model,
+            gemini_api_key: Some(api_key),
+            gemini_model: model,
+            deepseek_url: "http://mochi:4000/v1/chat/completions".to_string(),
+            deepseek_model: "v4.1flash".to_string(),
+            deepseek_api_key: "dseeker".to_string(),
+            enable_deepseek: true,
+            client,
+        })
+    }
+
+    pub fn from_config(config: &super::auth::MalConfig) -> Result<Self> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .context("Failed to build HTTP client for AI Parser")?;
+
+        Ok(Self {
+            gemini_api_key: config.gemini_api_key.clone(),
+            gemini_model: config.get_gemini_model(),
+            deepseek_url: config.get_deepseek_url(),
+            deepseek_model: config.get_deepseek_model(),
+            deepseek_api_key: config.get_deepseek_key(),
+            enable_deepseek: config.is_deepseek_enabled(),
             client,
         })
     }
 
     pub async fn classify(&self, raw_input: &str) -> Result<Option<GeminiClassification>> {
         let prompt = format!(
-            "Classify this video file: \"{}\". Determine whether it is an actual animated anime episode of a TV series/OVA/Movie that should be synced to MyAnimeList, or if it is a bonus extra, special, creditless OP/ED, live-action footage, or non-anime content. Return JSON with keys: is_syncable_anime (bool), title (string or null), episode (int or null), season (int or null), content_type (string), reason (string).",
+            "Classify this video file: \"{}\". Determine whether it is an actual animated anime episode of a TV series/OVA/Movie that should be synced to MyAnimeList, or if it is a bonus extra, special, creditless OP/ED, live-action footage, or non-anime content. Return strictly JSON with keys: is_syncable_anime (bool), title (string or null), episode (int or null), season (int or null), content_type (string), reason (string).",
             raw_input
         );
 
+        if self.enable_deepseek {
+            match self.classify_deepseek(&prompt).await {
+                Ok(Some(parsed)) => return Ok(Some(parsed)),
+                Err(e) => {
+                    eprintln!("  ℹ DeepSeek classification failed ({e}); falling back to Gemini...");
+                }
+                Ok(None) => {}
+            }
+        }
+
+        if let Some(ref api_key) = self.gemini_api_key {
+            return self.classify_gemini(&prompt, api_key).await;
+        }
+
+        Ok(None)
+    }
+
+    async fn classify_deepseek(&self, prompt: &str) -> Result<Option<GeminiClassification>> {
+        let payload = serde_json::json!({
+            "model": self.deepseek_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1
+        });
+
+        let response = self
+            .client
+            .post(&self.deepseek_url)
+            .header("Authorization", format!("Bearer {}", self.deepseek_api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("DeepSeek API request failed at '{}'", self.deepseek_url))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let err_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("DeepSeek API returned status {}: {}", status, err_text);
+        }
+
+        let body: serde_json::Value = response.json().await?;
+        let Some(content) = body["choices"][0]["message"]["content"].as_str() else {
+            return Ok(None);
+        };
+
+        let cleaned = clean_json_text(content);
+        let parsed: GeminiClassification = serde_json::from_str(&cleaned)
+            .with_context(|| format!("Failed to parse DeepSeek classification JSON: {}", cleaned))?;
+
+        Ok(Some(parsed))
+    }
+
+    async fn classify_gemini(&self, prompt: &str, api_key: &str) -> Result<Option<GeminiClassification>> {
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            self.gemini_model, api_key
         );
 
         let body = serde_json::json!({
@@ -136,7 +214,7 @@ impl GeminiParser {
             .json(&body)
             .send()
             .await
-            .with_context(|| format!("Gemini API request failed for model '{}'", self.model))?;
+            .with_context(|| format!("Gemini API request failed for model '{}'", self.gemini_model))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -176,6 +254,72 @@ impl GeminiParser {
 
     pub async fn parse(&self, raw_input: &str) -> Result<Option<AnimeInfo>> {
         let prompt = format!(
+            "Extract the official MyAnimeList canonical anime title (English or Romaji) and episode number from this filename or title: \"{}\". Return strictly JSON with keys: title (string), episode (integer).",
+            raw_input
+        );
+
+        if self.enable_deepseek {
+            match self.parse_deepseek(&prompt).await {
+                Ok(Some(info)) => return Ok(Some(info)),
+                Err(e) => {
+                    eprintln!("  ℹ DeepSeek parse failed ({e}); falling back to Gemini...");
+                }
+                Ok(None) => {}
+            }
+        }
+
+        if let Some(ref api_key) = self.gemini_api_key {
+            return self.parse_gemini(raw_input, api_key).await;
+        }
+
+        Ok(None)
+    }
+
+    async fn parse_deepseek(&self, prompt: &str) -> Result<Option<AnimeInfo>> {
+        let payload = serde_json::json!({
+            "model": self.deepseek_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1
+        });
+
+        let response = self
+            .client
+            .post(&self.deepseek_url)
+            .header("Authorization", format!("Bearer {}", self.deepseek_api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("DeepSeek API request failed at '{}'", self.deepseek_url))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let err_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("DeepSeek API returned status {}: {}", status, err_text);
+        }
+
+        let body: serde_json::Value = response.json().await?;
+        let Some(content) = body["choices"][0]["message"]["content"].as_str() else {
+            return Ok(None);
+        };
+
+        let cleaned = clean_json_text(content);
+        let parsed: GeminiParsedAnime = serde_json::from_str(&cleaned)
+            .with_context(|| format!("Failed to parse DeepSeek anime JSON: {}", cleaned))?;
+
+        if parsed.title.trim().is_empty() || parsed.episode == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(AnimeInfo {
+                title: parsed.title.trim().to_string(),
+                episode: parsed.episode,
+                season: None,
+            }))
+        }
+    }
+
+    async fn parse_gemini(&self, raw_input: &str, api_key: &str) -> Result<Option<AnimeInfo>> {
+        let prompt = format!(
             "Extract the official MyAnimeList canonical anime title (English or Romaji) and episode number from this filename or title: \"{}\". Return JSON matching the schema.",
             raw_input
         );
@@ -203,7 +347,7 @@ impl GeminiParser {
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            self.gemini_model, api_key
         );
 
         let response = self
@@ -212,7 +356,7 @@ impl GeminiParser {
             .json(&req_body)
             .send()
             .await
-            .with_context(|| format!("Gemini API request failed for model '{}'", self.model))?;
+            .with_context(|| format!("Gemini API request failed for model '{}'", self.gemini_model))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -258,4 +402,17 @@ impl GeminiParser {
             }))
         }
     }
+}
+
+fn clean_json_text(raw: &str) -> String {
+    let mut s = raw.trim();
+    if s.starts_with("```json") {
+        s = &s[7..];
+    } else if s.starts_with("```") {
+        s = &s[3..];
+    }
+    if s.ends_with("```") {
+        s = &s[..s.len() - 3];
+    }
+    s.trim().to_string()
 }

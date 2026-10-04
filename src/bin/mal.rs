@@ -145,17 +145,25 @@ async fn run_status() -> Result<()> {
     println!("Config file: {:?}", MalAuth::config_path());
     println!("Client ID: {}", config.client_id);
 
+    let ds_status = if config.is_deepseek_enabled() {
+        format!("Enabled ({}, {})", config.get_deepseek_model(), config.get_deepseek_url())
+    } else {
+        "Disabled".to_string()
+    };
+    println!("DeepSeek AI (Primary): {}", ds_status);
+
     let gemini_status = if let Some(ref k) = config.gemini_api_key {
         format!(
-            "Configured (ending in ...{})",
-            &k[k.len().saturating_sub(4)..]
+            "Configured (ending in ...{}, model: {})",
+            &k[k.len().saturating_sub(4)..],
+            config.get_gemini_model()
         )
     } else if env::var("GEMINI_API_KEY").is_ok() {
-        "Configured via GEMINI_API_KEY environment variable".to_string()
+        format!("Configured via GEMINI_API_KEY env (model: {})", config.get_gemini_model())
     } else {
-        "Not configured (using local regex parser)".to_string()
+        "Not configured (optional secondary fallback)".to_string()
     };
-    println!("Gemini AI Parser: {}", gemini_status);
+    println!("Gemini AI (Secondary): {}", gemini_status);
 
     let exp_dt: DateTime<Local> = Local
         .timestamp_opt(config.expires_at, 0)
@@ -181,29 +189,22 @@ async fn run_status() -> Result<()> {
 async fn run_test(name: &str) -> Result<()> {
     println!("Testing anime title & episode extraction for: \"{}\"", name);
 
-    let config = MalAuth::load_config().ok();
-    let gemini_key = env::var("GEMINI_API_KEY")
-        .ok()
-        .or_else(|| config.as_ref().and_then(|c| c.gemini_api_key.clone()));
-
-    if let Some(key) = gemini_key {
-        println!("[+] Querying Gemini AI parser...");
-        let model = config.as_ref().and_then(|c| c.gemini_model.clone());
-        if let Ok(gemini) = GeminiParser::new(key, model) {
-            match gemini.parse(name).await {
-                Ok(Some(info)) => {
-                    println!(
-                        "✔ Gemini Result: \"{}\" Episode {}",
-                        info.title, info.episode
-                    );
-                    return Ok(());
-                }
-                Ok(None) => println!("[-] Gemini returned no match, trying regex..."),
-                Err(e) => println!("[-] Gemini failed ({}), falling back to regex...", e),
+    let config = MalAuth::load_config().ok().unwrap_or_default();
+    if let Ok(parser) = GeminiParser::from_config(&config) {
+        println!("[+] Querying AI parser (DeepSeek primary with Gemini fallback)...");
+        match parser.parse(name).await {
+            Ok(Some(info)) => {
+                println!(
+                    "✔ AI Result: \"{}\" Episode {}",
+                    info.title, info.episode
+                );
+                return Ok(());
             }
+            Ok(None) => println!("[-] AI returned no match, trying regex..."),
+            Err(e) => println!("[-] AI query failed ({}), falling back to regex...", e),
         }
     } else {
-        println!("[-] Gemini API key not found, using regex parser...");
+        println!("[-] AI parser could not be initialized, using regex parser...");
     }
 
     match AnimeParser::parse(name) {

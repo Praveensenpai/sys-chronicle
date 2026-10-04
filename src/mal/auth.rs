@@ -20,6 +20,14 @@ pub struct MalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub deepseek_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deepseek_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deepseek_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_deepseek: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gemini_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gemini_model: Option<String>,
@@ -28,6 +36,55 @@ pub struct MalConfig {
     pub expires_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub toast_timeout_secs: Option<u32>,
+}
+
+impl MalConfig {
+    pub fn is_deepseek_enabled(&self) -> bool {
+        if let Ok(v) = std::env::var("ENABLE_DEEPSEEK") {
+            return v != "0" && v.to_lowercase() != "false";
+        }
+        self.enable_deepseek.unwrap_or(true)
+    }
+
+    pub fn get_deepseek_url(&self) -> String {
+        if let Ok(url) = std::env::var("DEEPSEEK_URL").or_else(|_| std::env::var("DEEPSEEK_BASE_URL")) {
+            let trimmed = url.trim();
+            if !trimmed.is_empty() {
+                if trimmed.ends_with("/chat/completions") {
+                    return trimmed.to_string();
+                } else if trimmed.ends_with("/v1") {
+                    return format!("{trimmed}/chat/completions");
+                } else {
+                    return format!("{trimmed}/v1/chat/completions");
+                }
+            }
+        }
+        self.deepseek_url
+            .clone()
+            .unwrap_or_else(|| "http://mochi:4000/v1/chat/completions".to_string())
+    }
+
+    pub fn get_deepseek_model(&self) -> String {
+        std::env::var("DEEPSEEK_MODEL")
+            .ok()
+            .or_else(|| self.deepseek_model.clone())
+            .unwrap_or_else(|| "v4.1flash".to_string())
+    }
+
+    pub fn get_deepseek_key(&self) -> String {
+        std::env::var("DEEPSEEK_API_KEY")
+            .or_else(|_| std::env::var("DEEPSEEKER_API_KEY"))
+            .ok()
+            .or_else(|| self.deepseek_api_key.clone())
+            .unwrap_or_else(|| "dseeker".to_string())
+    }
+
+    pub fn get_gemini_model(&self) -> String {
+        std::env::var("GEMINI_MODEL")
+            .ok()
+            .or_else(|| self.gemini_model.clone())
+            .unwrap_or_else(|| "gemini-3.1-flash-lite".to_string())
+    }
 }
 
 #[derive(Deserialize)]
@@ -125,6 +182,10 @@ impl MalAuth {
         let config = MalConfig {
             client_id,
             client_secret,
+            deepseek_url: Some("http://mochi:4000/v1/chat/completions".to_string()),
+            deepseek_model: Some("v4.1flash".to_string()),
+            deepseek_api_key: Some("dseeker".to_string()),
+            enable_deepseek: Some(true),
             gemini_api_key,
             gemini_model: Some("gemini-3.1-flash-lite".to_string()),
             access_token: token_resp.access_token,

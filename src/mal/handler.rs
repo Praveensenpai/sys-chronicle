@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use std::env;
+
 use std::io::{self, Read};
 use std::process::Command;
 
@@ -349,15 +349,9 @@ impl MalHandler {
         raw_media: &str,
         config: &super::auth::MalConfig,
     ) -> Option<super::classifier::MediaClassification> {
-        let gemini_key = env::var("GEMINI_API_KEY")
-            .ok()
-            .or_else(|| config.gemini_api_key.clone())
-            .filter(|k| !k.trim().is_empty());
+        let parser = GeminiParser::from_config(config).ok();
 
-        let gemini =
-            gemini_key.and_then(|k| GeminiParser::new(k, config.gemini_model.clone()).ok());
-
-        super::classifier::AnimeClassifier::classify(raw_media, gemini.as_ref())
+        super::classifier::AnimeClassifier::classify(raw_media, parser.as_ref())
             .await
             .unwrap_or(None)
     }
