@@ -69,6 +69,9 @@ pub struct ProgressUpdateParams<'a> {
     pub intervals: &'a [PlaybackInterval],
 }
 
+/// Per-anime reconciled metadata: (mal_anime_id, max_synced_episode, total_episodes).
+type AnimeMetadata = (Option<u64>, Option<u32>, Option<u32>);
+
 pub struct AnimeSyncHistory;
 
 fn normalize_for_match(s: &str) -> String {
@@ -174,7 +177,11 @@ fn higher_status(a: SyncStatus, b: SyncStatus) -> SyncStatus {
             SyncStatus::Failed { .. } | SyncStatus::NonSyncable { .. } => 0,
         }
     }
-    if rank(&b) > rank(&a) { b } else { a }
+    if rank(&b) > rank(&a) {
+        b
+    } else {
+        a
+    }
 }
 
 impl AnimeSyncHistory {
@@ -201,7 +208,8 @@ impl AnimeSyncHistory {
                 existing.status = higher_status(existing.status.clone(), rec.status);
                 existing.mal_anime_id = existing.mal_anime_id.or(rec.mal_anime_id);
                 existing.mal_current_ep = existing.mal_current_ep.or(rec.mal_current_ep);
-                existing.mal_total_episodes = existing.mal_total_episodes.or(rec.mal_total_episodes);
+                existing.mal_total_episodes =
+                    existing.mal_total_episodes.or(rec.mal_total_episodes);
 
                 if !rec.intervals.is_empty() {
                     existing.intervals =
@@ -219,7 +227,7 @@ impl AnimeSyncHistory {
         }
 
         // Reconcile MAL progress and metadata across episodes of the same anime
-        let mut anime_metadata: std::collections::HashMap<String, (Option<u64>, Option<u32>, Option<u32>)> =
+        let mut anime_metadata: std::collections::HashMap<String, AnimeMetadata> =
             std::collections::HashMap::new();
 
         for r in &deduped {
@@ -253,10 +261,11 @@ impl AnimeSyncHistory {
                             r.watched_secs = r.watched_secs.max(r.duration_secs);
                             r.watch_pct = r.watch_pct.max(100.0);
                             if r.intervals.is_empty() {
-                                r.intervals = vec![crate::monitor::timeline_tracker::PlaybackInterval {
-                                    start: 0,
-                                    end: r.duration_secs,
-                                }];
+                                r.intervals =
+                                    vec![crate::monitor::timeline_tracker::PlaybackInterval {
+                                        start: 0,
+                                        end: r.duration_secs,
+                                    }];
                             }
                         }
                     }

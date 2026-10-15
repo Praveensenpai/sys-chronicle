@@ -871,6 +871,11 @@ pub fn run_status_tui() -> Result<()> {
                     Span::styled(" force sync (override MAL) | ", Style::default().fg(Color::DarkGray)),
                     Span::styled("r", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     Span::styled(" refresh | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("g", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" group ({}) | ", media_tab_state.group_mode.label()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                     Span::styled(" exit", Style::default().fg(Color::DarkGray)),
                 ]
@@ -1403,6 +1408,9 @@ pub fn run_status_tui() -> Result<()> {
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             media_tab_state.refresh();
                             media_tab_state.set_status("Refreshed anime playback history.".into());
+                        }
+                        KeyCode::Char('g') | KeyCode::Char('G') => {
+                            media_tab_state.cycle_group_mode();
                         }
                         KeyCode::Esc => {
                             active_tab = ActiveTab::Live;

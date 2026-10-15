@@ -213,7 +213,9 @@ mod tests {
     #[test]
     fn test_cli_explicit_status_subcommand() {
         let cli = Cli::try_parse_from(["sys-chronicle", "status"]).expect("parse status");
-        assert!(matches!(cli.command, Some(Commands::Status { plain: false })));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Status { plain: false })
+        ));
     }
 }
-

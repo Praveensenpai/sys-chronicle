@@ -98,11 +98,7 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &MediaTabState) 
         Line::from(vec![
             Span::styled("File:      ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                if r.raw_title.len() > 34 {
-                    format!("{}...", &r.raw_title[..31])
-                } else {
-                    r.raw_title.clone()
-                },
+                super::truncate_name(&r.raw_title, 34),
                 Style::default().fg(Color::Gray),
             ),
         ]),

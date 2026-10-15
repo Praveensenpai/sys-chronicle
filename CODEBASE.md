@@ -86,7 +86,7 @@
 | `src/mal/parser.rs` | `AnimeParser`, `AnimeInfo` | Offline regex title/episode/season extractor. Strips release group tags (`[SubsPlease]`), hashes, resolutions (`1080p`), and codecs. Handles diverse anime file naming conventions. |
 | **`src/tui/`** | | |
 | `src/tui.rs` | `run_status_tui()`, `App` | Full Ratatui TUI dashboard. 3 tabs, state management, search (`/`), sort (`s`/`o`), limit (`t`), pause (`p`), AI export modal (`e`), process kill modal (`K`). |
-| `src/tui/media_tab.rs` | `render_media_tab()`, `MediaTabState` | Tab 3 layout: anime list pane (left) + media inspector pane (right), force sync modal confirmation. |
+| `src/tui/media_tab.rs` | `render_media_tab()`, `MediaTabState`, `GroupMode`, `MediaRow` | Tab 3 layout: anime list pane (left) + media inspector pane (right), force sync modal confirmation. Groups watching sessions temporally by **Day / Week / Month / Flat** (`g` cycles), inserting non-selectable magenta section headers. All title truncation is char-safe via `truncate_name` (no byte slicing). |
 | `src/tui/media_inspector.rs`| `render_anime_inspector()`, `render_force_sync_modal()` | Detailed inspector view: metadata, dual progress bars (Seek Head vs Anti-Cheat Unique Watched), status badge explanation. |
 | **`src/exporter/`** | | |
 | `src/exporter/mod.rs` | Re-exports | Re-exports `generate_ai_report`. |
@@ -279,6 +279,7 @@ The TUI operates on a 250ms tick loop rendering via `ratatui` with `CrosstermBac
 | **`s`** / **`Enter`** | MediaSync | Trigger manual background MAL sync for selected anime |
 | **`f`** | MediaSync | Open force overwrite confirmation modal (overrides `AheadOnMal`) |
 | **`r`** | MediaSync | Reload playback history from disk |
+| **`g`** | MediaSync | Cycle temporal grouping of watching sessions (`Day` ➔ `Week` ➔ `Month` ➔ `Flat`) |
 | **`o`** | Live / Analytics | Toggle sort direction (`Descending ↓` ↔ `Ascending ↑`) |
 | **`t`** | Live / Analytics | Cycle process list limit (`10` ➔ `25` ➔ `All`) |
 | **`p`** | Live | Pause / resume live metric sampling with frozen timestamp badge |

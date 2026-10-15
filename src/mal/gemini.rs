@@ -145,7 +145,9 @@ impl GeminiParser {
             match self.classify_deepseek(&prompt).await {
                 Ok(Some(parsed)) => return Ok(Some(parsed)),
                 Err(e) => {
-                    eprintln!("  ℹ DeepSeek classification failed ({e}); falling back to Gemini...");
+                    eprintln!(
+                        "  ℹ DeepSeek classification failed ({e}); falling back to Gemini..."
+                    );
                 }
                 Ok(None) => {}
             }
@@ -187,13 +189,18 @@ impl GeminiParser {
         };
 
         let cleaned = clean_json_text(content);
-        let parsed: GeminiClassification = serde_json::from_str(&cleaned)
-            .with_context(|| format!("Failed to parse DeepSeek classification JSON: {}", cleaned))?;
+        let parsed: GeminiClassification = serde_json::from_str(&cleaned).with_context(|| {
+            format!("Failed to parse DeepSeek classification JSON: {}", cleaned)
+        })?;
 
         Ok(Some(parsed))
     }
 
-    async fn classify_gemini(&self, prompt: &str, api_key: &str) -> Result<Option<GeminiClassification>> {
+    async fn classify_gemini(
+        &self,
+        prompt: &str,
+        api_key: &str,
+    ) -> Result<Option<GeminiClassification>> {
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
             self.gemini_model, api_key
@@ -214,7 +221,12 @@ impl GeminiParser {
             .json(&body)
             .send()
             .await
-            .with_context(|| format!("Gemini API request failed for model '{}'", self.gemini_model))?;
+            .with_context(|| {
+                format!(
+                    "Gemini API request failed for model '{}'",
+                    self.gemini_model
+                )
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -356,7 +368,12 @@ impl GeminiParser {
             .json(&req_body)
             .send()
             .await
-            .with_context(|| format!("Gemini API request failed for model '{}'", self.gemini_model))?;
+            .with_context(|| {
+                format!(
+                    "Gemini API request failed for model '{}'",
+                    self.gemini_model
+                )
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -1,3 +1,4 @@
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -5,10 +6,49 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
+use std::collections::HashMap;
 use std::time::Instant;
 
 use super::media_inspector::{render_anime_inspector, render_force_sync_modal};
 use crate::mal::{AnimeSyncHistory, AnimeSyncRecord, MalHandler, SyncStatus};
+
+const TIMESTAMP_FMT: &str = "%Y-%m-%d %H:%M:%S";
+const TITLE_COL_WIDTH: usize = 22;
+
+/// Temporal bucket used to group watching sessions in the anime list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupMode {
+    Day,
+    Week,
+    Month,
+    Flat,
+}
+
+impl GroupMode {
+    pub fn next(self) -> Self {
+        match self {
+            GroupMode::Day => GroupMode::Week,
+            GroupMode::Week => GroupMode::Month,
+            GroupMode::Month => GroupMode::Flat,
+            GroupMode::Flat => GroupMode::Day,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GroupMode::Day => "Day",
+            GroupMode::Week => "Week",
+            GroupMode::Month => "Month",
+            GroupMode::Flat => "Flat",
+        }
+    }
+}
+
+/// A rendered list entry: either a non-selectable group header or a record index.
+enum MediaRow {
+    Header(String),
+    Record(usize),
+}
 
 pub struct MediaTabState {
     pub records: Vec<AnimeSyncRecord>,
@@ -16,6 +56,7 @@ pub struct MediaTabState {
     pub status_message: Option<(String, Instant)>,
     pub confirming_force_sync: bool,
     pub list_state: ListState,
+    pub group_mode: GroupMode,
 }
 
 impl MediaTabState {
@@ -31,6 +72,7 @@ impl MediaTabState {
             status_message: None,
             confirming_force_sync: false,
             list_state,
+            group_mode: GroupMode::Day,
         }
     }
 
@@ -43,6 +85,14 @@ impl MediaTabState {
             self.selected_index = self.selected_index.min(self.records.len() - 1);
             self.list_state.select(Some(self.selected_index));
         }
+    }
+
+    pub fn cycle_group_mode(&mut self) {
+        self.group_mode = self.group_mode.next();
+        self.set_status(format!(
+            "Grouped watching sessions by {}",
+            self.group_mode.label()
+        ));
     }
 
     pub fn select_next(&mut self) {
@@ -113,6 +163,183 @@ impl MediaTabState {
     }
 }
 
+fn first_of_week(date: NaiveDate) -> NaiveDate {
+    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
+}
+
+fn first_of_month(date: NaiveDate) -> NaiveDate {
+    NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap_or(date)
+}
+
+fn weeks_between(today: NaiveDate, date: NaiveDate) -> i64 {
+    (first_of_week(today) - first_of_week(date)).num_days() / 7
+}
+
+fn months_between(today: NaiveDate, date: NaiveDate) -> i32 {
+    let a = first_of_month(today);
+    let b = first_of_month(date);
+    (a.year() - b.year()) * 12 + a.month() as i32 - b.month() as i32
+}
+
+fn group_label(mode: GroupMode, ts: NaiveDateTime, today: NaiveDate) -> String {
+    let date = ts.date();
+    match mode {
+        GroupMode::Flat => "All Sessions".to_string(),
+        GroupMode::Day => match (today - date).num_days() {
+            0 => "Today".to_string(),
+            1 => "Yesterday".to_string(),
+            _ => date.format("%A, %d %b %Y").to_string(),
+        },
+        GroupMode::Week => match weeks_between(today, date) {
+            0 => format!("This Week (from {})", first_of_week(today).format("%d %b")),
+            1 => format!("Last Week (from {})", first_of_week(date).format("%d %b")),
+            _ => format!("Week of {}", first_of_week(date).format("%d %b %Y")),
+        },
+        GroupMode::Month => match months_between(today, date) {
+            0 => "This Month".to_string(),
+            1 => "Last Month".to_string(),
+            _ => date.format("%B %Y").to_string(),
+        },
+    }
+}
+
+fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
+    NaiveDateTime::parse_from_str(ts, TIMESTAMP_FMT).ok()
+}
+
+/// Latest activity timestamp per anime so all episodes of one show stay in a single bucket.
+fn anime_latest_activity(records: &[AnimeSyncRecord]) -> HashMap<String, NaiveDateTime> {
+    let mut latest: HashMap<String, NaiveDateTime> = HashMap::new();
+    for record in records {
+        let Some(ts) = parse_timestamp(&record.last_updated) else {
+            continue;
+        };
+        let key = record.canonical_title.trim().to_lowercase();
+        latest
+            .entry(key)
+            .and_modify(|existing| {
+                if ts > *existing {
+                    *existing = ts;
+                }
+            })
+            .or_insert(ts);
+    }
+    latest
+}
+
+fn build_rows(records: &[AnimeSyncRecord], mode: GroupMode, today: NaiveDate) -> Vec<MediaRow> {
+    if mode == GroupMode::Flat {
+        return (0..records.len()).map(MediaRow::Record).collect();
+    }
+
+    let latest = anime_latest_activity(records);
+    let mut rows = Vec::with_capacity(records.len() + 8);
+    let mut current: Option<String> = None;
+
+    for (index, record) in records.iter().enumerate() {
+        let key = record.canonical_title.trim().to_lowercase();
+        let label = latest
+            .get(&key)
+            .copied()
+            .or_else(|| parse_timestamp(&record.last_updated))
+            .map(|ts| group_label(mode, ts, today))
+            .unwrap_or_else(|| "Unknown Date".to_string());
+
+        if current.as_deref() != Some(label.as_str()) {
+            rows.push(MediaRow::Header(label.clone()));
+            current = Some(label);
+        }
+        rows.push(MediaRow::Record(index));
+    }
+
+    rows
+}
+
+fn header_item(label: &str) -> ListItem<'static> {
+    ListItem::new(Line::from(Span::styled(
+        format!("  {}  ", label),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
+    )))
+}
+
+fn record_item(record: &AnimeSyncRecord, index: usize, is_sel: bool) -> ListItem<'static> {
+    let cursor = if is_sel { "► " } else { "  " };
+
+    let (badge_text, badge_color) = match &record.status {
+        SyncStatus::AheadOnMal { mal_episode } => (format!("MAL: Ep {}", mal_episode), Color::Cyan),
+        _ => (record.status.badge().0.to_string(), record.status.badge().1),
+    };
+
+    let title_display = super::truncate_name(&record.canonical_title, TITLE_COL_WIDTH);
+
+    ListItem::new(Line::from(vec![
+        Span::styled(
+            cursor,
+            Style::default().fg(if is_sel {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("#{:02} ", index + 1),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!("{:<width$} ", title_display, width = TITLE_COL_WIDTH),
+            Style::default()
+                .fg(if is_sel { Color::White } else { Color::Gray })
+                .add_modifier(if is_sel {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+        Span::styled(
+            format!("Ep {:<2} ", record.episode),
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!("{:>5.1}% ", record.watch_pct),
+            Style::default().fg(if record.watch_pct >= 80.0 {
+                Color::Green
+            } else {
+                Color::Blue
+            }),
+        ),
+        Span::styled(
+            format!("[{}]", badge_text),
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]))
+}
+
+fn render_empty_media(f: &mut Frame, area: Rect, block: Block<'_>) {
+    let empty_msg = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  No media playback history found.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ▶ Play an anime episode in MPV to track unique watch coverage.",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(Span::styled(
+            "  ⚡ Once you reach 80% coverage, it automatically logs to MyAnimeList.",
+            Style::default().fg(Color::Yellow),
+        )),
+    ])
+    .block(block);
+    f.render_widget(empty_msg, area);
+}
+
 pub fn render_media_tab(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -129,99 +356,40 @@ pub fn render_media_tab(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
 
 fn render_anime_list(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
     let block = Block::default()
-        .title(" 🎬 Anime & Media Chronicle ")
+        .title(format!(
+            " 🎬 Anime & Media Chronicle [Group: {} (g)] ",
+            state.group_mode.label()
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     if state.records.is_empty() {
-        let empty_msg = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  No media playback history found.",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  ▶ Play an anime episode in MPV to track unique watch coverage.",
-                Style::default().fg(Color::Gray),
-            )),
-            Line::from(Span::styled(
-                "  ⚡ Once you reach 80% coverage, it automatically logs to MyAnimeList.",
-                Style::default().fg(Color::Yellow),
-            )),
-        ])
-        .block(block);
-        f.render_widget(empty_msg, area);
+        render_empty_media(f, area, block);
         return;
     }
 
-    let items: Vec<ListItem> = state
-        .records
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let is_sel = i == state.selected_index;
-            let cursor = if is_sel { "► " } else { "  " };
+    let rows = build_rows(&state.records, state.group_mode, Local::now().date_naive());
+    let mut items: Vec<ListItem> = Vec::with_capacity(rows.len());
+    let mut selected_row = None;
 
-            let (badge_text, badge_color) = match &r.status {
-                SyncStatus::AheadOnMal { mal_episode } => {
-                    (format!("MAL: Ep {}", mal_episode), Color::Cyan)
+    for (row_index, row) in rows.iter().enumerate() {
+        match row {
+            MediaRow::Header(label) => items.push(header_item(label)),
+            MediaRow::Record(record_index) => {
+                let is_sel = *record_index == state.selected_index;
+                if is_sel {
+                    selected_row = Some(row_index);
                 }
-                _ => (r.status.badge().0.to_string(), r.status.badge().1),
-            };
+                items.push(record_item(
+                    &state.records[*record_index],
+                    *record_index,
+                    is_sel,
+                ));
+            }
+        }
+    }
 
-            let title_display = if r.canonical_title.len() > 22 {
-                format!("{}...", &r.canonical_title[..19])
-            } else {
-                r.canonical_title.clone()
-            };
-
-            let line = Line::from(vec![
-                Span::styled(
-                    cursor,
-                    Style::default().fg(if is_sel {
-                        Color::Yellow
-                    } else {
-                        Color::DarkGray
-                    }),
-                ),
-                Span::styled(
-                    format!("#{:02} ", i + 1),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{:<22} ", title_display),
-                    Style::default()
-                        .fg(if is_sel { Color::White } else { Color::Gray })
-                        .add_modifier(if is_sel {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-                Span::styled(
-                    format!("Ep {:<2} ", r.episode),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Span::styled(
-                    format!("{:>5.1}% ", r.watch_pct),
-                    Style::default().fg(if r.watch_pct >= 80.0 {
-                        Color::Green
-                    } else {
-                        Color::Blue
-                    }),
-                ),
-                Span::styled(
-                    format!("[{}]", badge_text),
-                    Style::default()
-                        .fg(badge_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]);
-
-            ListItem::new(line)
-        })
-        .collect();
+    state.list_state.select(selected_row);
 
     let list = List::new(items)
         .block(block)
@@ -229,3 +397,6 @@ fn render_anime_list(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
 
     f.render_stateful_widget(list, area, &mut state.list_state);
 }
+
+#[cfg(test)]
+mod tests;

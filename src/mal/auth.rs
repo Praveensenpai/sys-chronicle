@@ -47,7 +47,9 @@ impl MalConfig {
     }
 
     pub fn get_deepseek_url(&self) -> String {
-        if let Ok(url) = std::env::var("DEEPSEEK_URL").or_else(|_| std::env::var("DEEPSEEK_BASE_URL")) {
+        if let Ok(url) =
+            std::env::var("DEEPSEEK_URL").or_else(|_| std::env::var("DEEPSEEK_BASE_URL"))
+        {
             let trimmed = url.trim();
             if !trimmed.is_empty() {
                 if trimmed.ends_with("/chat/completions") {

@@ -146,7 +146,11 @@ async fn run_status() -> Result<()> {
     println!("Client ID: {}", config.client_id);
 
     let ds_status = if config.is_deepseek_enabled() {
-        format!("Enabled ({}, {})", config.get_deepseek_model(), config.get_deepseek_url())
+        format!(
+            "Enabled ({}, {})",
+            config.get_deepseek_model(),
+            config.get_deepseek_url()
+        )
     } else {
         "Disabled".to_string()
     };
@@ -159,7 +163,10 @@ async fn run_status() -> Result<()> {
             config.get_gemini_model()
         )
     } else if env::var("GEMINI_API_KEY").is_ok() {
-        format!("Configured via GEMINI_API_KEY env (model: {})", config.get_gemini_model())
+        format!(
+            "Configured via GEMINI_API_KEY env (model: {})",
+            config.get_gemini_model()
+        )
     } else {
         "Not configured (optional secondary fallback)".to_string()
     };
@@ -194,10 +201,7 @@ async fn run_test(name: &str) -> Result<()> {
         println!("[+] Querying AI parser (DeepSeek primary with Gemini fallback)...");
         match parser.parse(name).await {
             Ok(Some(info)) => {
-                println!(
-                    "✔ AI Result: \"{}\" Episode {}",
-                    info.title, info.episode
-                );
+                println!("✔ AI Result: \"{}\" Episode {}", info.title, info.episode);
                 return Ok(());
             }
             Ok(None) => println!("[-] AI returned no match, trying regex..."),

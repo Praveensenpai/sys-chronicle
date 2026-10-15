@@ -257,9 +257,7 @@ fn try_load_existing_intervals(
         if existing.watch_pct >= 80.0
             || matches!(
                 existing.status,
-                SyncStatus::Synced
-                    | SyncStatus::AheadOnMal { .. }
-                    | SyncStatus::ThresholdMet
+                SyncStatus::Synced | SyncStatus::AheadOnMal { .. } | SyncStatus::ThresholdMet
             )
         {
             tracker.set_threshold_triggered(true);
