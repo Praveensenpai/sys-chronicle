@@ -168,7 +168,7 @@ impl MalHandler {
             info.title, info.episode
         );
 
-        let mal_outcome = match Self::sync_with_mal(&mut config, &info, force).await {
+        let mal_outcome = match Self::sync_with_mal(&mut config, raw_media, &info, force).await {
             Ok(res) => res,
             Err(e) => {
                 eprintln!(
@@ -279,22 +279,22 @@ impl MalHandler {
 
     async fn sync_with_mal(
         config: &mut super::auth::MalConfig,
+        media_path: &str,
         info: &super::parser::AnimeInfo,
         force: bool,
     ) -> Result<Option<(super::client::MalAnimeNode, u32, SyncStatus)>> {
         let token = MalAuth::get_valid_token(config).await?;
         let client = MalClient::new(token)?;
 
-        let search_results = client.search_anime(&info.title).await?;
-        let Some(anime) =
-            super::candidate::select_best_candidate(&search_results, &info.title, info.season)
+        let Some(resolved) = super::resolver::resolve_anime(&client, media_path, info).await?
         else {
             println!(
-                "[sys-chronicle-mal] No search results found on MAL for: \"{}\"",
+                "[sys-chronicle-mal] No confident MAL match found for: \"{}\"",
                 info.title
             );
             return Ok(None);
         };
+        let anime = resolved.anime;
 
         let current_watched = anime
             .my_list_status

@@ -1,4 +1,4 @@
-use super::client::MalAnimeNode;
+use super::client::{MalAnimeNode, MediaKind};
 use regex::Regex;
 
 #[derive(Debug, Clone)]
@@ -17,6 +17,10 @@ pub fn normalize_for_comparison(s: &str) -> String {
         .join(" ")
 }
 
+/// Detect season number and media hints encoded in a title string.
+///
+/// Returns `(season, is_special, is_movie)`. The special/movie flags are a
+/// last-resort fallback for nodes that carry no MAL `media_type`.
 pub fn detect_season_and_type(title: &str) -> (Option<u32>, bool, bool) {
     let lower = title.to_lowercase();
     let is_movie =
@@ -57,68 +61,184 @@ pub fn strip_season_and_type_tags(normalized: &str) -> String {
     normalized.to_string()
 }
 
+/// Resolve the media kind of a node, preferring MAL's own `media_type` and
+/// only falling back to title keywords when MAL did not report one.
+fn node_kind(node: &MalAnimeNode) -> MediaKind {
+    let kind = node.media_kind();
+    if kind != MediaKind::Unknown {
+        return kind;
+    }
+    let (_, is_special, is_movie) = detect_season_and_type(&node.title);
+    if is_movie {
+        MediaKind::Movie
+    } else if is_special {
+        MediaKind::Special
+    } else {
+        MediaKind::Unknown
+    }
+}
+
+/// Infer a season number from folder names such as `Season 03` or `S03`.
+///
+/// The AI parser often omits the season, while the on-disk layout still
+/// encodes it, so the path is a reliable fallback before assuming season 1.
+pub fn season_from_path(media_path: &str) -> Option<u32> {
+    let path = std::path::Path::new(media_path);
+    let mut found = None;
+    for component in path.components() {
+        let text = component.as_os_str().to_string_lossy().to_string();
+        if let (Some(season), _, _) = detect_season_and_type(&text) {
+            found = Some(season);
+        }
+    }
+    found
+}
+
+/// Best available season number for a node, checking synonyms too.
+fn node_season(node: &MalAnimeNode) -> Option<u32> {
+    for title in node.all_titles() {
+        if let (Some(season), _, _) = detect_season_and_type(title) {
+            return Some(season);
+        }
+    }
+    None
+}
+
+/// Best base-title similarity between the query and any known title of the node.
+fn base_similarity(node: &MalAnimeNode, norm_query: &str) -> i32 {
+    let mut best = i32::MIN;
+    for title in node.all_titles() {
+        let norm = normalize_for_comparison(title);
+        let base = strip_season_and_type_tags(&norm);
+        let similarity = if base == norm_query {
+            150
+        } else if base.starts_with(norm_query) || norm_query.starts_with(&base) {
+            80
+        } else if norm.contains(norm_query) {
+            40
+        } else {
+            0
+        };
+        best = best.max(similarity);
+    }
+    if best == i32::MIN {
+        0
+    } else {
+        best
+    }
+}
+
+/// Score a candidate, or return `None` when it must be excluded outright.
+///
+/// A series query never accepts a special/movie entry, and a known target
+/// season never accepts an entry from a different season.
 pub fn score_candidate(
     candidate: &MalAnimeNode,
     query_title: &str,
-    target_season: u32,
-    query_is_special: bool,
-    query_is_movie: bool,
-) -> i32 {
-    let norm_query = normalize_for_comparison(query_title);
-    let norm_cand = normalize_for_comparison(&candidate.title);
-    let base_cand = strip_season_and_type_tags(&norm_cand);
-    let (cand_season, cand_special, cand_movie) = detect_season_and_type(&candidate.title);
-    let effective_cand_season = cand_season.unwrap_or(1);
-
-    let mut score: i32 = 0;
-
-    if base_cand == norm_query {
-        score += 150;
-    } else if base_cand.starts_with(&norm_query) || norm_query.starts_with(&base_cand) {
-        score += 80;
-    } else if norm_cand.contains(&norm_query) {
-        score += 40;
+    target_season: Option<u32>,
+    query_kind: MediaKind,
+) -> Option<i32> {
+    let norm_query = strip_season_and_type_tags(&normalize_for_comparison(query_title));
+    if norm_query.is_empty() {
+        return None;
     }
 
-    if query_is_movie {
-        if cand_movie {
-            score += 120;
-        } else {
-            score -= 120;
-        }
-    } else if query_is_special {
-        if cand_special {
-            score += 120;
-        } else {
-            score -= 120;
-        }
-    } else {
-        if cand_movie {
-            score -= 200;
-        }
-        if cand_special {
-            score -= 200;
-        }
-        if effective_cand_season == target_season {
-            score += 100;
-        } else {
-            score -= 200;
-        }
+    let kind = node_kind(candidate);
+    let similarity = base_similarity(candidate, &norm_query);
+    if similarity == 0 {
+        return None;
     }
 
-    if let Some(ref status) = candidate.my_list_status {
-        if effective_cand_season == target_season {
-            score += 50;
-            if status.num_episodes_watched > 0 {
-                score += 20;
+    let mut score = similarity;
+
+    match query_kind {
+        MediaKind::Special => {
+            if kind == MediaKind::Special {
+                score += 120;
+            } else {
+                return None;
+            }
+        }
+        MediaKind::Movie => {
+            if kind == MediaKind::Movie {
+                score += 120;
+            } else {
+                return None;
+            }
+        }
+        _ => {
+            if kind == MediaKind::Special || kind == MediaKind::Movie {
+                return None;
+            }
+            let effective_season = node_season(candidate).unwrap_or(1);
+            match target_season {
+                Some(target) if effective_season == target => score += 100,
+                Some(_) => return None,
+                None => {
+                    if effective_season != 1 {
+                        score -= 100;
+                    }
+                }
+            }
+            if let Some(ref status) = candidate.my_list_status {
+                score += 50;
+                if status.num_episodes_watched > 0 {
+                    score += 20;
+                }
             }
         }
     }
 
+    let norm_cand = normalize_for_comparison(&candidate.title);
     let len_diff = (norm_cand.len() as i32 - norm_query.len() as i32).abs();
     score -= len_diff.min(30);
 
-    score
+    Some(score)
+}
+
+/// Build the ordered list of MAL search queries to try for one media item.
+///
+/// MAL's relevance ranking drops sequels when only the base title is queried,
+/// so a known season always adds a `"<title> Season N"` query. Duplicates are
+/// removed while keeping the original order.
+pub fn build_search_queries(title: &str, season: Option<u32>) -> Vec<String> {
+    let mut queries = Vec::new();
+    let base = title.trim();
+    if base.is_empty() {
+        return queries;
+    }
+    queries.push(base.to_string());
+
+    let canonical = normalize_for_comparison(base);
+    let stripped = strip_season_and_type_tags(&canonical);
+    let title_is_tagged = !stripped.is_empty() && stripped != canonical;
+    let (title_season, _, _) = detect_season_and_type(base);
+
+    match season.filter(|s| *s > 1) {
+        Some(target) if title_is_tagged && title_season == Some(target) => {
+            // The title already names the exact season; no extra query needed.
+        }
+        Some(target) => {
+            if title_is_tagged {
+                queries.push(stripped.clone());
+            }
+            let stem = if title_is_tagged {
+                stripped.as_str()
+            } else {
+                base
+            };
+            queries.push(format!("{} Season {}", stem, target));
+        }
+        None => {
+            if title_is_tagged {
+                queries.push(stripped.clone());
+            }
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    queries.retain(|q| seen.insert(q.to_lowercase()));
+    queries
 }
 
 pub fn select_best_candidate<'a>(
@@ -126,42 +246,43 @@ pub fn select_best_candidate<'a>(
     query_title: &str,
     target_season: Option<u32>,
 ) -> Option<&'a MalAnimeNode> {
-    if candidates.is_empty() {
-        return None;
-    }
-
     let (query_season, query_special, query_movie) = detect_season_and_type(query_title);
-    let resolved_season = target_season.or(query_season).unwrap_or(1);
+    let query_kind = if query_movie {
+        MediaKind::Movie
+    } else if query_special {
+        MediaKind::Special
+    } else {
+        MediaKind::Series
+    };
+    let resolved_season = match query_kind {
+        MediaKind::Series => target_season.or(query_season),
+        _ => None,
+    };
 
     let mut scored: Vec<ScoredCandidate<'a>> = candidates
         .iter()
-        .map(|node| ScoredCandidate {
-            node,
-            score: score_candidate(
-                node,
-                query_title,
-                resolved_season,
-                query_special,
-                query_movie,
-            ),
+        .filter_map(|node| {
+            score_candidate(node, query_title, resolved_season, query_kind)
+                .map(|score| ScoredCandidate { node, score })
         })
         .collect();
 
     scored.sort_by_key(|b| std::cmp::Reverse(b.score));
-
     scored.first().map(|sc| sc.node)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mal::client::UserListStatus;
+    use crate::mal::client::{AlternativeTitles, UserListStatus};
 
-    fn make_node(id: u64, title: &str, in_list: bool) -> MalAnimeNode {
+    fn make_node(id: u64, title: &str, media_type: &str, in_list: bool) -> MalAnimeNode {
         MalAnimeNode {
             id,
             title: title.to_string(),
             num_episodes: 12,
+            media_type: Some(media_type.to_string()),
+            alternative_titles: None,
             my_list_status: if in_list {
                 Some(UserListStatus {
                     status: Some("watching".into()),
@@ -176,39 +297,92 @@ mod tests {
     #[test]
     fn test_selects_season_1_over_season_2_when_no_season_specified() {
         let candidates = vec![
-            make_node(38474, "Yuru Camp△ Season 2", false),
-            make_node(34798, "Yuru Camp△", true),
-            make_node(53410, "Yuru Camp△ Season 3", false),
-            make_node(38475, "Yuru Camp△ Movie", false),
+            make_node(38474, "Yuru Camp△ Season 2", "tv", false),
+            make_node(34798, "Yuru Camp△", "tv", true),
+            make_node(53410, "Yuru Camp△ Season 3", "tv", false),
+            make_node(38475, "Yuru Camp△ Movie", "movie", false),
         ];
 
         let best = select_best_candidate(&candidates, "Yuru Camp", None);
         assert_eq!(best.unwrap().id, 34798);
-        assert_eq!(best.unwrap().title, "Yuru Camp△");
     }
 
     #[test]
     fn test_selects_season_2_when_target_season_specified() {
         let candidates = vec![
-            make_node(34798, "Yuru Camp△", true),
-            make_node(38474, "Yuru Camp△ Season 2", false),
-            make_node(53410, "Yuru Camp△ Season 3", false),
+            make_node(34798, "Yuru Camp△", "tv", true),
+            make_node(38474, "Yuru Camp△ Season 2", "tv", false),
+            make_node(53410, "Yuru Camp△ Season 3", "tv", false),
         ];
 
         let best = select_best_candidate(&candidates, "Yuru Camp", Some(2));
         assert_eq!(best.unwrap().id, 38474);
-        assert_eq!(best.unwrap().title, "Yuru Camp△ Season 2");
     }
 
     #[test]
-    fn test_penalizes_specials_and_movies() {
+    fn test_special_never_beats_real_season_3() {
+        let mut real = make_node(53410, "Yuru Camp△ Season 3", "tv", false);
+        real.alternative_titles = Some(AlternativeTitles {
+            synonyms: vec!["Yuru Camp 3rd Season".into()],
+            english: Some("Laid-Back Camp Season 3".into()),
+            japanese: None,
+        });
         let candidates = vec![
-            make_node(38475, "Yuru Camp△ Movie", false),
-            make_node(37341, "Yuru Camp△ Specials", false),
-            make_node(34798, "Yuru Camp△", false),
+            make_node(58855, "Yuru Camp△ Season 3 Specials", "special", false),
+            real,
         ];
 
-        let best = select_best_candidate(&candidates, "Yuru Camp", None);
-        assert_eq!(best.unwrap().id, 34798);
+        let best = select_best_candidate(&candidates, "Laid-Back Camp", Some(3));
+        assert_eq!(best.unwrap().id, 53410);
+    }
+
+    #[test]
+    fn test_special_only_candidate_for_season_returns_none() {
+        let candidates = vec![make_node(
+            58855,
+            "Yuru Camp△ Season 3 Specials",
+            "special",
+            false,
+        )];
+
+        assert!(select_best_candidate(&candidates, "Laid-Back Camp", Some(3)).is_none());
+    }
+
+    #[test]
+    fn test_movie_never_matches_series_query() {
+        let candidates = vec![make_node(38475, "Yuru Camp△ Movie", "movie", false)];
+
+        assert!(select_best_candidate(&candidates, "Yuru Camp", Some(3)).is_none());
+    }
+
+    #[test]
+    fn test_query_builder_adds_season_and_dedupes() {
+        let queries = build_search_queries("Laid-Back Camp", Some(3));
+        assert_eq!(
+            queries,
+            vec![
+                "Laid-Back Camp".to_string(),
+                "Laid-Back Camp Season 3".to_string()
+            ]
+        );
+
+        let already = build_search_queries("Yuru Camp Season 3", Some(3));
+        assert_eq!(already, vec!["Yuru Camp Season 3".to_string()]);
+
+        assert!(build_search_queries("   ", Some(3)).is_empty());
+    }
+
+    #[test]
+    fn test_synonym_matches_base_title() {
+        let mut node = make_node(53410, "Yuru Camp△ Season 3", "tv", false);
+        node.alternative_titles = Some(AlternativeTitles {
+            synonyms: vec!["Laid-Back Camp 3rd Season".into()],
+            english: None,
+            japanese: None,
+        });
+        let candidates = vec![node];
+
+        let best = select_best_candidate(&candidates, "Laid-Back Camp", Some(3));
+        assert_eq!(best.unwrap().id, 53410);
     }
 }

@@ -5,7 +5,9 @@ pub mod client;
 pub mod gemini;
 pub mod handler;
 pub mod history;
+pub mod overrides;
 pub mod parser;
+pub mod resolver;
 
 pub use auth::MalAuth;
 pub use candidate::select_best_candidate;
@@ -14,4 +16,6 @@ pub use client::MalClient;
 pub use gemini::GeminiParser;
 pub use handler::MalHandler;
 pub use history::{AnimeSyncHistory, AnimeSyncRecord, SyncStatus};
+pub use overrides::{AnimeOverride, AnimeOverrides};
 pub use parser::{AnimeInfo, AnimeParser};
+pub use resolver::{resolve_anime, ResolvedAnime};

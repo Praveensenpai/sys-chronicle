@@ -60,7 +60,7 @@
 | :--- | :--- | :--- |
 | `src/main.rs` | `Cli`, `Commands`, `main()` | CLI parsing (`clap`), initializes Tokiomultitask daemon (`Window`, `Power`, `Metrics`, `Mpv`), dispatches `status`, `summary`, `export`, and `install-service`. |
 | `src/lib.rs` | Public module exports | Re-exports `exporter`, `logger`, `mal`, `monitor`, `plugin`, `service`, `tui`. |
-| `src/bin/mal.rs` | `Cli`, `Commands`, `run_login()`, `run_status()`, `run_sync()` | Companion binary CLI. Handles OAuth PKCE setup, status check, test parsing, manual/forced MAL sync, and plugin hook stdin pipe. |
+| `src/bin/mal.rs` | `Cli`, `Commands`, `run_login()`, `run_status()`, `run_sync()`, `run_map()` | Companion binary CLI. Handles OAuth PKCE setup, status check, test parsing, manual/forced MAL sync, folder→MAL mapping (`map --id/--list/--remove/--json`), and plugin hook stdin pipe. |
 | **`src/logger/`** | | |
 | `src/logger/mod.rs` | `ActivityEvent`, `LogWriter` | Module definitions and re-exports. |
 | `src/logger/event.rs` | `ActivityEvent` (enum) | Tagged serde JSON event definitions: `WindowFocus`, `PowerState`, `SystemMetrics`, `MediaPlayback`, `MediaWatchThreshold`. |
@@ -77,9 +77,11 @@
 | **`src/mal/`** | | |
 | `src/mal.rs` | Module re-exports | Exposes all MAL client, auth, parser, and history interfaces. |
 | `src/mal/auth.rs` | `MalAuth`, `MalConfig`, `TokenResponse` | MAL OAuth2 PKCE flow. Spins up temporary local server on `127.0.0.1:8080/callback`. Auto-refreshes tokens expiring within 5 min. Config stored in `~/.config/sys-chronicle/mal_config.json`. |
-| `src/mal/candidate.rs` | `select_best_candidate()`, `score_candidate()` | Scored candidate matching against MAL search results. Awards points for title match (+150), season match (+100), user list presence (+50); heavily penalizes mismatched seasons (-200), movies, and specials (-200). |
+| `src/mal/candidate.rs` | `select_best_candidate()`, `score_candidate()`, `build_search_queries()`, `season_from_path()`, `detect_season_and_type()` | Media-type-aware candidate matching. Uses MAL `media_type` (not title keywords) to hard-exclude specials/movies for series queries and mismatched seasons (returns `None`, never a wrong fallback). Scores title/synonym similarity, list presence, season. `build_search_queries()` emits base + `"<title> Season N"` queries (deduped). `season_from_path()` recovers the season from folders like `Season 03`. |
 | `src/mal/classifier.rs` | `AnimeClassifier`, `MediaClassification` | Filters non-syncable content (bonus extras, creditless OP/EDs, live-action footage, trailers, disc menus) using directory heuristics and Gemini 3.1 Flash-Lite AI classifier. |
-| `src/mal/client.rs` | `MalClient`, `MalAnimeNode`, `UserProfile`, `UserListStatus` | Reqwest HTTP client for MyAnimeList API v2 (`/users/@me`, `/anime?q=...`, `/anime/{id}/my_list_status`). Sets status to `watching` or `completed`. |
+| `src/mal/client.rs` | `MalClient`, `MalAnimeNode`, `AlternativeTitles`, `MediaKind`, `UserProfile`, `UserListStatus` | Reqwest HTTP client for MyAnimeList API v2 (`/users/@me`, `/anime?q=...`, `/anime/{id}`, `/anime/{id}/my_list_status`). Requests `media_type` + `alternative_titles` (`en`/`ja`/`synonyms`); `all_titles()` and `media_kind()` feed candidate scoring. `get_anime(id)` resolves manual overrides. |
+| `src/mal/overrides.rs` | `AnimeOverrides`, `AnimeOverride`, `reassign_history()` | Manual folder-scoped MAL bindings in `~/.local/share/sys-chronicle/anime_overrides.json`. Longest-ancestor-prefix lookup keyed by canonical folder, optional `specials_mal_anime_id` for special/other files. `reassign_history()` rewrites existing records so a corrected binding applies immediately. |
+| `src/mal/resolver.rs` | `resolve_anime()`, `resolve_from_override()`, `ResolvedAnime` | Resolution pipeline: manual folder override first, otherwise merge results from every query in `build_search_queries()` (deduped by MAL id) and select once. Falls back to `season_from_path()` when AI omits the season. |
 | `src/mal/gemini.rs` | `GeminiParser`, `GeminiClassification` | Google Gemini 3.1 Flash-Lite REST client. Uses structured output (`responseSchema`) to extract canonical titles, episode numbers, and non-syncable classifications. |
 | `src/mal/handler.rs` | `MalHandler` | Central scrobbler coordinator. Handles stdin JSON hook, 80% threshold events, classification, candidate search, "Ahead-of-MAL" downgrade guard, and `notify-send` desktop alerts. |
 | `src/mal/history.rs` | `AnimeSyncHistory`, `AnimeSyncRecord`, `SyncStatus`, `higher_status()` | Local persistent state in `~/.local/share/sys-chronicle/anime_sync_history.json`. Tracks playback intervals, position, watch %, and MAL status badges. `upsert` merges intervals and preserves max `watched_secs`/`watch_pct` — never regresses progress on re-open. `higher_status` ranks `Synced > AheadOnMal > ThresholdMet > Watching`. |
@@ -88,6 +90,7 @@
 | `src/tui.rs` | `run_status_tui()`, `App` | Full Ratatui TUI dashboard. 3 tabs, state management, search (`/`), sort (`s`/`o`), limit (`t`), pause (`p`), AI export modal (`e`), process kill modal (`K`). |
 | `src/tui/media_tab.rs` | `render_media_tab()`, `MediaTabState`, `GroupMode`, `MediaRow` | Tab 3 layout: anime list pane (left) + media inspector pane (right), force sync modal confirmation. Groups watching sessions temporally by **Day / Week / Month / Flat** (`g` cycles), inserting non-selectable magenta section headers. All title truncation is char-safe via `truncate_name` (no byte slicing). |
 | `src/tui/media_inspector.rs`| `render_anime_inspector()`, `render_force_sync_modal()` | Detailed inspector view: metadata, dual progress bars (Seek Head vs Anti-Cheat Unique Watched), status badge explanation. |
+| `src/tui/media_picker.rs`| `MediaPickerState`, `render_media_picker()` | Folder→MAL picker modal (`m`). Debounced background search on a dedicated current-thread tokio runtime with `Arc<Mutex<Option<SearchOutcome>>>` polling and a generation counter to discard stale results. `Enter` persists the override and reassigns history. |
 | **`src/exporter/`** | | |
 | `src/exporter/mod.rs` | Re-exports | Re-exports `generate_ai_report`. |
 | `src/exporter/ai.rs` | `generate_ai_report()` | Formats daily JSONL activity logs into a Markdown prompt with app usage, timeline intervals, brief focus buckets (<5s), battery discharge deltas, and CPU/RAM load. |
@@ -103,6 +106,7 @@
 | :--- | :--- | :--- |
 | **Activity Logs** | `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl` | Rolling JSON Lines |
 | **MAL Sync State** | `~/.local/share/sys-chronicle/anime_sync_history.json` | JSON Array of `AnimeSyncRecord` |
+| **MAL Folder Overrides** | `~/.local/share/sys-chronicle/anime_overrides.json` | JSON Array of `AnimeOverride` (folder keyed) |
 | **MAL OAuth & AI Config** | `~/.config/sys-chronicle/mal_config.json` | JSON Object (`client_id`, tokens, keys) |
 | **Plugin Directory** | `~/.config/sys-chronicle/plugins/` | Executable files / symlinks |
 | **Systemd User Unit** | `~/.config/systemd/user/sys-chronicle.service` | Systemd service unit file |
@@ -227,19 +231,23 @@ All events written to `activity-YYYY-MM-DD.jsonl` are tagged with `"type"`:
   - `coverage_pct = (total_unique_secs / duration_secs) * 100.0` (clamped to 100%).
 - **Threshold**: When `coverage_pct >= 80.0%`, threshold event fires exactly once per media key.
 
-### 2. Candidate Matching Score (`candidate.rs`)
-Given query title $Q$, candidate $C$, and target season $S$:
-- **Base Match**: Normalized alphanumeric comparison without punctuation or case.
-  - Full match: `+150`
-  - Prefix match: `+80`
-  - Substring match: `+40`
-- **Media Type Modifiers**:
-  - If query is normal TV series but candidate is Movie or Special: `-200` penalty.
-  - If query is Movie and candidate is Movie: `+120`.
-  - If candidate season == target season: `+100` (mismatched: `-200`).
-- **User List Bonus**:
-  - In user's list: `+50` (`+20` if `num_episodes_watched > 0`).
-- **Length Penalty**: `-min(30, abs(len(C) - len(Q)))`.
+### 2. Candidate Matching (`candidate.rs` + `resolver.rs`)
+**Search**: `build_search_queries(Q, S)` emits `Q`, a tag-stripped variant when the title carries a tag, and `"<stem> Season S"` when `S > 1` (deduped). `resolver::resolve_anime()` merges results from every query (deduped by MAL id) before scoring once. When AI omits the season, `season_from_path()` recovers it from the folder (`Season 03`, `S03`).
+
+**Hard exclusions** (candidate returns `None`, no fallback):
+- Series query: MAL `media_type` of `special`/`ova`/`ona`/`movie` is rejected.
+- Special query: only `special`/`ova`/`ona` accepted. Movie query: only `movie`.
+- Known target season: a candidate whose season differs is rejected.
+
+**Score** (best over `title` + `en` + `ja` + `synonyms`):
+- Full base match: `+150`, prefix: `+80`, substring: `+40`.
+- Season match: `+100`. No target season and season ≠ 1: `-100`.
+- In user's list: `+50` (`+20` if `num_episodes_watched > 0`).
+- Length penalty: `-min(30, abs(len(C) - len(Q)))`.
+
+**Folder override** (`overrides.rs`): a stored binding wins over search unconditionally, matched by longest ancestor prefix of the file's parent folder, so renamed files and specials inside that folder inherit it. `map` also rewrites existing history rows.
+
+> Malformed JSON field names were a real bug: MAL returns `alternative_titles.en` / `.ja`, so those serde keys must be renamed or every English title is dropped.
 
 ### 3. Ahead-of-MAL Downgrade Guard (`handler.rs`)
 - Compares `info.episode` against user's current MAL watched episode count.
@@ -278,6 +286,7 @@ The TUI operates on a 250ms tick loop rendering via `ratatui` with `CrosstermBac
 | **`s`** / **`Enter`** | Live | Toggle sort metric between RAM and CPU |
 | **`s`** / **`Enter`** | MediaSync | Trigger manual background MAL sync for selected anime |
 | **`f`** | MediaSync | Open force overwrite confirmation modal (overrides `AheadOnMal`) |
+| **`m`** | MediaSync | Open folder→MAL picker modal (search MAL, `↑/↓` select, `Enter` bind folder, `Esc` cancel) |
 | **`r`** | MediaSync | Reload playback history from disk |
 | **`g`** | MediaSync | Cycle temporal grouping of watching sessions (`Day` ➔ `Week` ➔ `Month` ➔ `Flat`) |
 | **`o`** | Live / Analytics | Toggle sort direction (`Descending ↓` ↔ `Ascending ↑`) |
@@ -310,6 +319,10 @@ sys-chronicle-mal test "[Group] Title - 01" # Test regex/Gemini title parsing
 sys-chronicle-mal sync "Anime Title"        # Manually sync an anime
 sys-chronicle-mal sync "Anime Title" --force# Force overwrite MAL progress
 sys-chronicle-mal config --toast 2          # Set notification duration to 2s
+sys-chronicle-mal map <path> --id 53410     # Bind folder to a MAL entry (override)
+sys-chronicle-mal map --list                # List folder overrides
+sys-chronicle-mal map <path> --remove       # Remove a folder override
+sys-chronicle-mal map --list --json         # Machine-readable overrides
 sys-chronicle-mal hook                      # Run in stdin event hook mode
 ```
 

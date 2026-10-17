@@ -36,6 +36,23 @@ enum Commands {
         #[arg(long, short)]
         force: bool,
     },
+    /// Bind a media folder to a specific MyAnimeList entry (manual override)
+    Map {
+        /// Media file or folder whose parent folder should be bound
+        path: Option<String>,
+        /// MyAnimeList anime id to bind the folder to
+        #[arg(long)]
+        id: Option<u64>,
+        /// List every stored folder override
+        #[arg(long)]
+        list: bool,
+        /// Remove the override for the given folder
+        #[arg(long)]
+        remove: bool,
+        /// Print machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// View or configure MAL settings (e.g. toast duration)
     Config {
         /// Set toast notification duration in seconds (e.g. 2)
@@ -64,6 +81,15 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Sync { name, force }) => {
             run_sync(&name, force).await?;
+        }
+        Some(Commands::Map {
+            path,
+            id,
+            list,
+            remove,
+            json,
+        }) => {
+            run_map(path, id, list, remove, json).await?;
         }
         Some(Commands::Config { toast, seconds }) => {
             run_config(toast.or(seconds)).await?;
@@ -239,6 +265,103 @@ async fn run_sync(name: &str, force: bool) -> Result<()> {
         None => {
             println!("[-] Sync could not be completed.");
         }
+    }
+    Ok(())
+}
+
+fn folder_from_path(path: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        p.to_path_buf()
+    } else {
+        p.parent().unwrap_or(p).to_path_buf()
+    }
+}
+
+async fn run_map(
+    path: Option<String>,
+    id: Option<u64>,
+    list: bool,
+    remove: bool,
+    json: bool,
+) -> Result<()> {
+    let mut overrides = sys_chronicle::mal::AnimeOverrides::load()?;
+
+    if list {
+        if json {
+            println!("{}", serde_json::to_string_pretty(overrides.entries())?);
+        } else if overrides.entries().is_empty() {
+            println!("No folder overrides configured.");
+        } else {
+            for entry in overrides.entries() {
+                println!(
+                    "{} -> {} ({}){}",
+                    entry.folder,
+                    entry.mal_anime_id,
+                    entry.canonical_title,
+                    entry
+                        .specials_mal_anime_id
+                        .map(|s| format!(" [specials: {}]", s))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    let Some(raw_path) = path else {
+        anyhow::bail!("A path is required. Usage: sys-chronicle-mal map <path> --id <mal_id>");
+    };
+    let folder = folder_from_path(&raw_path);
+
+    if remove {
+        match overrides.remove(&folder) {
+            Some(removed) => {
+                overrides.save()?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&removed)?);
+                } else {
+                    println!("✔ Removed override for {}", removed.folder);
+                }
+            }
+            None => println!("No override stored for {}", folder.display()),
+        }
+        return Ok(());
+    }
+
+    let Some(anime_id) = id else {
+        anyhow::bail!("An anime id is required. Usage: sys-chronicle-mal map <path> --id <mal_id>");
+    };
+
+    let mut config = MalAuth::load_config()?;
+    let token = MalAuth::get_valid_token(&mut config).await?;
+    let client = MalClient::new(token)?;
+    let anime = client.get_anime(anime_id).await?;
+
+    let total = if anime.num_episodes > 0 {
+        Some(anime.num_episodes)
+    } else {
+        None
+    };
+    let entry = overrides.set(&folder, anime.id, &anime.title, total);
+    overrides.save()?;
+    let touched =
+        sys_chronicle::mal::overrides::reassign_history(&folder, anime.id, &anime.title, total)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry)?);
+    } else {
+        println!(
+            "✔ Bound {} -> {} ({}){}",
+            entry.folder,
+            anime.id,
+            anime.title,
+            if touched > 0 {
+                format!("; updated {} history record(s)", touched)
+            } else {
+                String::new()
+            }
+        );
     }
     Ok(())
 }

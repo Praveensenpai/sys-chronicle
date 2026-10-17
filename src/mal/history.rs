@@ -187,7 +187,23 @@ fn higher_status(a: SyncStatus, b: SyncStatus) -> SyncStatus {
 impl AnimeSyncHistory {
     pub fn storage_path() -> PathBuf {
         #[cfg(test)]
-        return std::env::temp_dir().join("sys_chronicle_test_anime_sync_history.json");
+        {
+            // History tests run in parallel threads and each one expects an
+            // isolated store, so scope the temp file to the current thread.
+            use std::sync::OnceLock;
+            thread_local! {
+                static TEST_PATH: OnceLock<PathBuf> = const { OnceLock::new() };
+            }
+            TEST_PATH.with(|slot| {
+                slot.get_or_init(|| {
+                    std::env::temp_dir().join(format!(
+                        "sys_chronicle_test_anime_sync_history_{:?}.json",
+                        std::thread::current().id()
+                    ))
+                })
+                .clone()
+            })
+        }
         #[cfg(not(test))]
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("~/.local/share"))

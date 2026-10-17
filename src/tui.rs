@@ -25,7 +25,9 @@ use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
 mod media_inspector;
+mod media_picker;
 mod media_tab;
+use media_picker::{render_media_picker, MediaPickerState};
 use media_tab::{render_media_tab, MediaTabState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,6 +385,7 @@ pub fn run_status_tui() -> Result<()> {
     let mut export_modal: Option<ExportModalState> = None;
     let mut toast_message: Option<(String, Instant)> = None;
     let mut media_tab_state = MediaTabState::new();
+    let mut media_picker_state = MediaPickerState::new();
 
     let mut list_state = ListState::default();
     list_state.select(Some(0));
@@ -394,6 +397,7 @@ pub fn run_status_tui() -> Result<()> {
     let mut cached_analytics = compute_daily_screen_time();
 
     loop {
+        media_picker_state.poll();
         let now = Local::now();
 
         // Sample current data if not paused
@@ -856,6 +860,8 @@ pub fn run_status_tui() -> Result<()> {
                 }
             }
 
+            render_media_picker(f, f.size(), &media_picker_state);
+
             // Footer Controls
             let pause_action_str = if is_paused { "resume" } else { "pause" };
             let footer_lines = if active_tab == ActiveTab::MediaSync {
@@ -869,6 +875,8 @@ pub fn run_status_tui() -> Result<()> {
                     Span::styled(" manual sync | ", Style::default().fg(Color::DarkGray)),
                     Span::styled("f", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                     Span::styled(" force sync (override MAL) | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("m", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(" map folder | ", Style::default().fg(Color::DarkGray)),
                     Span::styled("r", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                     Span::styled(" refresh | ", Style::default().fg(Color::DarkGray)),
                     Span::styled("g", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
@@ -1375,6 +1383,24 @@ pub fn run_status_tui() -> Result<()> {
 
                 // MediaSync Tab Key Dispatcher
                 if active_tab == ActiveTab::MediaSync {
+                    if media_picker_state.visible {
+                        match key.code {
+                            KeyCode::Esc => media_picker_state.close(),
+                            KeyCode::Enter => {
+                                if let Some(msg) = media_picker_state.apply() {
+                                    media_tab_state.refresh();
+                                    media_tab_state.set_status(msg);
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Tab => media_picker_state.select_next(),
+                            KeyCode::Up => media_picker_state.select_prev(),
+                            KeyCode::Backspace => media_picker_state.pop_char(),
+                            KeyCode::Char(c) => media_picker_state.push_char(c),
+                            _ => {}
+                        }
+                        continue;
+                    }
+
                     if media_tab_state.confirming_force_sync {
                         match key.code {
                             KeyCode::Char('f') | KeyCode::Char('F') => {
@@ -1404,6 +1430,26 @@ pub fn run_status_tui() -> Result<()> {
                         }
                         KeyCode::Char('f') | KeyCode::Char('F') => {
                             media_tab_state.trigger_sync(true);
+                        }
+                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                            let record = media_tab_state.selected_record().cloned();
+                            let folder = record
+                                .as_ref()
+                                .and_then(|r| r.path.as_deref().or(Some(r.raw_title.as_str())))
+                                .map(std::path::Path::new)
+                                .map(|p| p.parent().unwrap_or(p).to_path_buf());
+                            let seed = record
+                                .as_ref()
+                                .map(|r| {
+                                    crate::mal::candidate::strip_season_and_type_tags(
+                                        &crate::mal::candidate::normalize_for_comparison(
+                                            &r.canonical_title,
+                                        ),
+                                    )
+                                })
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or_default();
+                            media_picker_state.open(folder, &seed);
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             media_tab_state.refresh();
