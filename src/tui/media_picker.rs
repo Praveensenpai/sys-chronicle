@@ -6,11 +6,21 @@ use ratatui::{
     Frame,
 };
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::time::{Duration, Instant};
 
 use crate::mal::client::MalAnimeNode;
 use crate::mal::overrides::reassign_history;
 use crate::mal::{AnimeOverrides, MalAuth, MalClient};
+
+/// Delay applied after the last keystroke before hitting the MAL API.
+/// Prevents one network request per typed character.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
+
+struct SearchRequest {
+    generation: u64,
+    query: String,
+}
 
 /// Result handed back from the background search thread.
 struct SearchOutcome {
@@ -29,11 +39,17 @@ pub struct MediaPickerState {
     pub status: Option<String>,
     folder: Option<PathBuf>,
     generation: u64,
-    shared: Arc<Mutex<Option<SearchOutcome>>>,
+    pending_since: Option<Instant>,
+    request_tx: Sender<SearchRequest>,
+    outcome_rx: Receiver<SearchOutcome>,
 }
 
 impl MediaPickerState {
     pub fn new() -> Self {
+        let (request_tx, request_rx) = mpsc::channel::<SearchRequest>();
+        let (outcome_tx, outcome_rx) = mpsc::channel::<SearchOutcome>();
+        std::thread::spawn(move || search_worker(request_rx, outcome_tx));
+
         Self {
             visible: false,
             query: String::new(),
@@ -43,7 +59,9 @@ impl MediaPickerState {
             status: None,
             folder: None,
             generation: 0,
-            shared: Arc::new(Mutex::new(None)),
+            pending_since: None,
+            request_tx,
+            outcome_rx,
         }
     }
 
@@ -61,6 +79,7 @@ impl MediaPickerState {
     pub fn close(&mut self) {
         self.visible = false;
         self.searching = false;
+        self.pending_since = None;
     }
 
     pub fn push_char(&mut self, c: char) {
@@ -71,6 +90,18 @@ impl MediaPickerState {
     pub fn pop_char(&mut self) {
         self.query.pop();
         self.start_search();
+    }
+
+    /// Re-run the current query, bypassing the debounce. Bound to a dedicated
+    /// key so the user can retry without editing the text.
+    pub fn retry(&mut self) {
+        self.start_search();
+        self.pending_since = Some(Instant::now() - SEARCH_DEBOUNCE);
+    }
+
+    /// True when there is nothing to bind, so `Enter` should re-query instead.
+    pub fn needs_query(&self) -> bool {
+        self.results.is_empty()
     }
 
     pub fn select_next(&mut self) {
@@ -89,44 +120,76 @@ impl MediaPickerState {
         }
     }
 
+    /// Mark the current query dirty and arm the debounce timer.
     fn start_search(&mut self) {
         let query = self.query.trim().to_string();
         self.results.clear();
         self.selected = 0;
         self.status = None;
         self.generation += 1;
+        self.pending_since = None;
         if query.is_empty() {
             self.searching = false;
             return;
         }
 
         self.searching = true;
-        let generation = self.generation;
-        let shared = Arc::clone(&self.shared);
-        std::thread::spawn(move || {
-            let (results, error) = search_blocking(&query);
-            if let Ok(mut slot) = shared.lock() {
-                *slot = Some(SearchOutcome {
-                    generation,
-                    results,
-                    error,
-                });
-            }
-        });
+        self.pending_since = Some(Instant::now());
+    }
+
+    /// Dispatch the pending request once the quiet period has elapsed.
+    pub fn tick(&mut self) {
+        let Some(since) = self.pending_since else {
+            return;
+        };
+        if since.elapsed() < SEARCH_DEBOUNCE {
+            return;
+        }
+        self.pending_since = None;
+
+        let query = self.query.trim().to_string();
+        if query.is_empty() {
+            self.searching = false;
+            return;
+        }
+
+        let request = SearchRequest {
+            generation: self.generation,
+            query,
+        };
+        // The worker thread lives for the process lifetime, so a failed send
+        // only happens during shutdown. Surface it instead of hanging.
+        if self.request_tx.send(request).is_err() {
+            self.searching = false;
+            self.status = Some("Search worker stopped unexpectedly.".to_string());
+        }
     }
 
     /// Collect a finished background search, if any. Call once per UI loop.
     pub fn poll(&mut self) {
-        let taken = self.shared.lock().ok().and_then(|mut slot| slot.take());
-        let Some(outcome) = taken else { return };
-        if outcome.generation != self.generation {
-            return;
-        }
-        self.searching = false;
-        self.results = outcome.results;
-        self.selected = 0;
-        if let Some(err) = outcome.error {
-            self.status = Some(err);
+        loop {
+            match self.outcome_rx.try_recv() {
+                Ok(outcome) => {
+                    if outcome.generation != self.generation {
+                        continue;
+                    }
+                    self.searching = false;
+                    self.results = outcome.results;
+                    self.selected = 0;
+                    if let Some(err) = outcome.error {
+                        self.status = Some(err);
+                    }
+                    return;
+                }
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    if self.searching {
+                        self.searching = false;
+                        self.status = Some("Search worker stopped unexpectedly.".to_string());
+                    }
+                    return;
+                }
+            }
         }
     }
 
@@ -158,13 +221,42 @@ impl MediaPickerState {
         let touched = reassign_history(&folder, anime.id, &anime.title, total).unwrap_or(0);
         self.close();
         Some(format!(
-            "Bound {} -> {} ({}){}; updated {} record(s)",
+            "Bound {} -> {} ({}); updated {} record(s)",
             folder.display(),
             anime.id,
             anime.title,
-            "",
             touched
         ))
+    }
+}
+
+/// Single long-lived worker. Consumes requests in order and always replies
+/// with the newest query it was handed, so no request is ever lost to a race.
+fn search_worker(request_rx: Receiver<SearchRequest>, outcome_tx: Sender<SearchOutcome>) {
+    let mut latest: Option<SearchRequest> = None;
+    loop {
+        if latest.is_none() {
+            match request_rx.recv() {
+                Ok(req) => latest = Some(req),
+                Err(_) => return,
+            }
+        }
+
+        // Drain anything queued while we were busy: only the newest matters.
+        while let Ok(next) = request_rx.try_recv() {
+            latest = Some(next);
+        }
+
+        let Some(req) = latest.take() else { continue };
+        let (results, error) = search_blocking(&req.query);
+        let outcome = SearchOutcome {
+            generation: req.generation,
+            results,
+            error,
+        };
+        if outcome_tx.send(outcome).is_err() {
+            return;
+        }
     }
 }
 
@@ -235,6 +327,8 @@ pub fn render_media_picker(f: &mut Frame, area: Rect, state: &MediaPickerState) 
         "searching…".to_string()
     } else if let Some(ref msg) = state.status {
         msg.clone()
+    } else if state.results.is_empty() {
+        "0 result(s) — press Ctrl+R to retry".to_string()
     } else {
         format!("{} result(s)", state.results.len())
     };
@@ -306,6 +400,11 @@ pub fn render_media_picker(f: &mut Frame, area: Rect, state: &MediaPickerState) 
     );
     f.render_widget(list, inner[1]);
 
+    let enter_label = if state.needs_query() {
+        " search "
+    } else {
+        " bind folder "
+    };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(
             " ↑/↓ ",
@@ -316,7 +415,12 @@ pub fn render_media_picker(f: &mut Frame, area: Rect, state: &MediaPickerState) 
             " Enter ",
             Style::default().bg(Color::Green).fg(Color::Black),
         ),
-        Span::raw(" bind folder   "),
+        Span::raw(enter_label),
+        Span::styled(
+            " Ctrl+R ",
+            Style::default().bg(Color::Cyan).fg(Color::Black),
+        ),
+        Span::raw(" re-query   "),
         Span::styled(
             " Esc ",
             Style::default().bg(Color::DarkGray).fg(Color::White),

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -398,6 +398,7 @@ pub fn run_status_tui() -> Result<()> {
 
     loop {
         media_picker_state.poll();
+        media_picker_state.tick();
         let now = Local::now();
 
         // Sample current data if not paused
@@ -1386,6 +1387,16 @@ pub fn run_status_tui() -> Result<()> {
                     if media_picker_state.visible {
                         match key.code {
                             KeyCode::Esc => media_picker_state.close(),
+                            // Ctrl+R always re-runs the query, even with results on screen.
+                            KeyCode::Char('r') | KeyCode::Char('R')
+                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                media_picker_state.retry();
+                            }
+                            // Enter re-queries when there is nothing to bind yet.
+                            KeyCode::Enter if media_picker_state.needs_query() => {
+                                media_picker_state.retry();
+                            }
                             KeyCode::Enter => {
                                 if let Some(msg) = media_picker_state.apply() {
                                     media_tab_state.refresh();
@@ -1441,11 +1452,7 @@ pub fn run_status_tui() -> Result<()> {
                             let seed = record
                                 .as_ref()
                                 .map(|r| {
-                                    crate::mal::candidate::strip_season_and_type_tags(
-                                        &crate::mal::candidate::normalize_for_comparison(
-                                            &r.canonical_title,
-                                        ),
-                                    )
+                                    crate::mal::candidate::seed_query_from_title(&r.canonical_title)
                                 })
                                 .filter(|s| !s.is_empty())
                                 .unwrap_or_default();

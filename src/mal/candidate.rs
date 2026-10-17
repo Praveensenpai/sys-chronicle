@@ -61,7 +61,82 @@ pub fn strip_season_and_type_tags(normalized: &str) -> String {
     normalized.to_string()
 }
 
-/// Resolve the media kind of a node, preferring MAL's own `media_type` and
+/// Strip filename noise that a canonical title can still carry.
+///
+/// `canonical_title` is not always a clean series name. When the AI title pass
+/// misses, it keeps the literal filename, e.g.
+/// `Laid-Back Camp - The Movie (2022) [Japanese] [1080p].mkv`. A query built
+/// from that always returns zero MAL results, so drop the media extension and
+/// any bracketed release/spec tags first.
+fn strip_file_noise(title: &str) -> String {
+    let mut text = title.to_string();
+
+    let lower = text.to_ascii_lowercase();
+    for ext in [".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v"] {
+        if lower.ends_with(ext) {
+            text.truncate(text.len() - ext.len());
+            break;
+        }
+    }
+
+    if let Ok(re_tags) = Regex::new(r"\[[^\]]*\]") {
+        text = re_tags.replace_all(&text, " ").to_string();
+    }
+
+    text.replace(&['_', '.'][..], " ").trim().to_string()
+}
+
+/// Build the best starting MAL search string from a canonical title.
+///
+/// Canonical titles frequently keep a trailing release year (`... (2022)`) or
+/// the word `Movie`. MAL matches queries literally, so either poisons the
+/// search and yields zero results. Strip those, plus any article left dangling
+/// at the end after the strip.
+pub fn seed_query_from_title(title: &str) -> String {
+    // Do NOT use `normalize_for_comparison` here: it deletes punctuation, so
+    // `Laid-Back Camp` collapses to `laidback camp`, which MAL matches
+    // literally and returns zero hits for. For outbound queries we keep word
+    // boundaries by turning punctuation into spaces instead.
+    let cleaned = strip_file_noise(title);
+    let lower = cleaned.to_lowercase();
+    let spaced: String = lower
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c.is_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let collapsed = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // Drop episode/season markers and media-type words that poison MAL search.
+    let mut sanitized = strip_season_and_type_tags(&collapsed);
+    if let Ok(re_ep) = Regex::new(r"(?i)\bs\d{1,2}e\d{1,4}\b|\be\d{1,4}\b") {
+        sanitized = re_ep.replace_all(&sanitized, " ").to_string();
+    }
+    let stripped = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut words: Vec<&str> = stripped.split_whitespace().collect();
+
+    if let Some(last) = words.last() {
+        if last.len() == 4 && last.chars().all(|c| c.is_ascii_digit()) {
+            words.pop();
+        }
+    }
+
+    while let Some(last) = words.last() {
+        if matches!(*last, "the" | "a" | "an" | "of" | "no") {
+            words.pop();
+        } else {
+            break;
+        }
+    }
+
+    words.join(" ")
+}
+
+/// Resolve the media kind of a node, preferring MAL's own `media_type` and</｜｜DSML｜｜>
 /// only falling back to title keywords when MAL did not report one.
 fn node_kind(node: &MalAnimeNode) -> MediaKind {
     let kind = node.media_kind();
@@ -384,5 +459,30 @@ mod tests {
 
         let best = select_best_candidate(&candidates, "Laid-Back Camp", Some(3));
         assert_eq!(best.unwrap().id, 53410);
+    }
+
+    #[test]
+    fn seed_query_drops_year_and_dangling_article() {
+        assert_eq!(
+            seed_query_from_title("Laid-Back Camp the Movie (2022)"),
+            "laid back camp"
+        );
+        assert_eq!(seed_query_from_title("Yuru Camp△ Season 2"), "yuru camp");
+        assert_eq!(seed_query_from_title(""), "");
+    }
+
+    #[test]
+    fn seed_query_strips_filename_and_release_tags() {
+        // Real stored record: the AI title pass kept the whole filename.
+        // MAL matches literally, so hyphens must survive as separators.
+        assert_eq!(
+            seed_query_from_title("Laid-Back Camp - The Movie (2022) [Japanese] [1080p].mkv"),
+            "laid back camp"
+        );
+        assert_eq!(
+            seed_query_from_title("Laid-Back Camp - S03E01 [Japanese] [1080p].mkv"),
+            "laid back camp"
+        );
+        assert_eq!(seed_query_from_title("Yuru Camp△ Season 2"), "yuru camp");
     }
 }
