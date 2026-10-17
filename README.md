@@ -121,6 +121,8 @@ sys-chronicle status
 | **`e`** | **Instant AI Export** | Formats today's activity into Markdown payload and copies to clipboard (`wl-copy`) |
 | **`s`** / **`Enter`** | **Sync Anime / Sort** | On Anime tab: manual sync to MAL. On Live tab: toggle RAM/CPU sort |
 | **`f`** | **Force Sync Anime** | On Anime tab: opens confirmation modal to force overwrite MAL when MAL is ahead |
+| **`m`** | **Map Folder to MAL** | On Anime tab: opens MAL search picker to bind the selected file's folder to a specific MAL entry |
+| **`g`** | **Group Sessions** | On Anime tab: cycle temporal grouping (**`Day`** ➔ **`Week`** ➔ **`Month`** ➔ **`Flat`**) |
 | **`r`** | **Refresh Anime** | On Anime tab: reloads playback history from disk |
 | **`o`** | **Toggle Sort Order** | Toggle sorting order (**`Descending ↓`** ↔ **`Ascending ↑`**) |
 | **`t`** | **Toggle List Limit** | Cycle application limit count (**`10`** ➔ **`25`** ➔ **`All`**) |
@@ -184,6 +186,8 @@ Total Unique Watched: 19 mins / 24 mins = 79.1% (Pending...)
 - 📊 **Dedicated 3rd TUI Tab**: Switch to the **Anime & MAL Sync** tab (<kbd>Tab</kbd>) to inspect playback progress bars, watch percentages, and sync statuses (`[▶ WATCHING]`, `[✓ SYNCED]`, `[⏩ MAL AHEAD]`, `[🎬 LIVE-ACT]`).
 - 🛡️ **Ahead-of-MAL Downgrade Guard**: Prevents re-watching earlier episodes from overwriting higher progress already recorded on MyAnimeList.
 - ⚡ **Manual & Force Sync**: Instant sync inside the TUI (<kbd>s</kbd> / <kbd>Enter</kbd>) or via CLI (`sys-chronicle-mal sync <NAME>`), with modal confirmation (<kbd>f</kbd> or `--force`) to override MAL progress when intentional.
+- 🗂️ **Folder-Scoped Overrides**: Bind a folder to a MAL entry once and every file inside inherits it — renamed files, specials, `Other/` extras. Longest-ancestor-prefix matching, so nested folders can override parents. Press <kbd>m</kbd> in the MediaSync tab to search and bind, or use `sys-chronicle-mal map <path> --id <mal_id>`. Existing history rows are rewritten immediately.
+- 🎯 **Media-Type Aware Matching**: Candidates are filtered by MAL's own `media_type`, so `Specials`/`OVA`/`Movie` entries are rejected for series queries and mismatched seasons are rejected outright instead of silently winning a score.
 - 🔔 **Desktop Notifications**: Sends desktop alerts via `notify-send` when an episode is updated.
 
 ### AI Configuration & Commands
@@ -225,7 +229,13 @@ sys-chronicle-mal test "[SubsPlease] Sousou no Frieren - 04 (1080p) [9A1B2C3D].m
 sys-chronicle-mal sync "Sousou no Frieren"
 sys-chronicle-mal sync "Sousou no Frieren" --force
 
-# 5. Link as an active plugin for sys-chronicle (handled automatically by install.sh)
+# 5. Bind a folder to a specific MAL entry (manual override)
+sys-chronicle-mal map "/home/user/Videos/Anime/Season 03" --id 53410
+sys-chronicle-mal map --list                # list every stored folder binding
+sys-chronicle-mal map --list --json         # machine-readable
+sys-chronicle-mal map "/home/user/Videos/Anime/Season 03" --remove
+
+# 6. Link as an active plugin for sys-chronicle (handled automatically by install.sh)
 mkdir -p ~/.config/sys-chronicle/plugins
 ln -sf ~/.local/bin/sys-chronicle-mal ~/.config/sys-chronicle/plugins/sys-chronicle-mal
 ```
