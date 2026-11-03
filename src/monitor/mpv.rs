@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Local;
 use serde::Deserialize;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -43,16 +43,33 @@ impl MpvMonitor {
         paths
     }
 
-    fn find_active_socket() -> Option<PathBuf> {
-        Self::candidate_sockets().into_iter().find(|p| p.exists())
+    async fn try_connect_candidate(socket_path: &Path) -> Option<UnixStream> {
+        if !socket_path.exists() {
+            return None;
+        }
+        match UnixStream::connect(socket_path).await {
+            Ok(stream) => Some(stream),
+            Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => {
+                let _ = std::fs::remove_file(socket_path);
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    async fn connect_active_socket() -> Option<UnixStream> {
+        for path in Self::candidate_sockets() {
+            if let Some(stream) = Self::try_connect_candidate(&path).await {
+                return Some(stream);
+            }
+        }
+        None
     }
 
     pub async fn run(&mut self, running: Arc<AtomicBool>) -> Result<()> {
         while running.load(Ordering::SeqCst) {
-            if let Some(socket_path) = Self::find_active_socket() {
-                if let Ok(stream) = UnixStream::connect(&socket_path).await {
-                    let _ = self.handle_mpv_session(stream, running.clone()).await;
-                }
+            if let Some(stream) = Self::connect_active_socket().await {
+                let _ = self.handle_mpv_session(stream, running.clone()).await;
             }
             sleep(Duration::from_secs(2)).await;
         }
@@ -215,5 +232,21 @@ mod tests {
         assert_eq!(saijo.position_secs, Some(6));
         assert_eq!(saijo.intervals.len(), 1);
         assert_eq!(saijo.status, crate::mal::SyncStatus::Watching);
+    }
+
+    #[tokio::test]
+    async fn test_try_connect_candidate_cleans_stale_socket() {
+        let test_socket = std::env::temp_dir().join(format!(
+            "test_stale_socket_{}.sock",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&test_socket);
+        let listener = std::os::unix::net::UnixListener::bind(&test_socket).expect("bind socket");
+        drop(listener);
+        assert!(test_socket.exists());
+
+        let stream = MpvMonitor::try_connect_candidate(&test_socket).await;
+        assert!(stream.is_none());
+        assert!(!test_socket.exists(), "stale socket must be removed");
     }
 }

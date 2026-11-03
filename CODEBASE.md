@@ -1,338 +1,491 @@
-# ⏱️ sys-chronicle — Codebase Architecture & Technical Reference
+# CODEBASE.md: sys-chronicle Semantic Digest
 
-> **Living Technical Documentation**: This document serves as the high-density technical blueprint and mental model of `sys-chronicle`. Any modification to the codebase (architecture, modules, types, protocols, or storage) **must** be reflected in this file to maintain zero-drift alignment.
+> **Notice**: AI-optimized semantic index. Do not write narrative prose. Keep token density high.
 
----
-
-## 🧭 Repository Overview & Binary Targets
-
-`sys-chronicle` is an ultra-lightweight (~10 MB RAM) background daemon, interactive Ratatui TUI dashboard, and AI context generator built for Arch Linux / Hyprland (Wayland), paired with an anti-cheat MyAnimeList (MAL) companion scrobbler (`sys-chronicle-mal`).
-
-```
-                              ┌────────────────────────────────────────┐
-                              │  Hyprland Wayland IPC (.socket2.sock)  │
-                              └──────────────────┬─────────────────────┘
-                                                 │ event-driven focus
-                                                 ▼
-┌──────────────────────┐              ┌──────────────────────┐              ┌───────────────────────────┐
-│ Linux /sys Subsystem │ ──power/hw──▶│ sys-chronicle Daemon │◀──JSON IPC───│      MPV Media Player     │
-│ (battery, hwmon)     │              │    (src/main.rs)     │              │     (/tmp/mpvsocket)      │
-└──────────────────────┘              └──────────┬───────────┘              └───────────────────────────┘
-                                                 │
-                                                 │ writes daily JSONL
-                                                 ▼
-                              ┌──────────────────────────────────────┐
-                              │ ~/.local/share/sys-chronicle/logs/   │
-                              │   activity-YYYY-MM-DD.jsonl          │
-                              └──────────┬───────────────────┬───────┘
-                                         │                   │
-                     ┌───────────────────┘                   └──────────────────┐
-                     ▼                                                          ▼
-       ┌───────────────────────────┐                              ┌───────────────────────────┐
-       │   Interactive Ratatui     │                              │   Plugin Dispatch Engine  │
-       │      TUI Dashboard        │                              │ (stdin JSON pipe to hooks)│
-       │   (sys-chronicle status)  │                              └─────────────┬─────────────┘
-       └───────────────────────────┘                                            │
-                                                                                ▼
-                                                                  ┌───────────────────────────┐
-                                                                  │     sys-chronicle-mal     │
-                                                                  │   (Companion Scrobbler)   │
-                                                                  └─────────────┬─────────────┘
-                                                                                │
-                                              ┌─────────────────────────────────┴───────────────────────────────┐
-                                              ▼                                                                 ▼
-                               ┌─────────────────────────────┐                                   ┌─────────────────────────────┐
-                               │   Gemini 3.1 Flash-Lite AI  │                                   │     MyAnimeList API v2      │
-                               │ Classifier & Episode Parser │                                   │ (OAuth2 PKCE Scrobbler)     │
-                               └─────────────────────────────┘                                   └─────────────────────────────┘
+## 1. System Topology & Data Flow
+```text
+Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 ```
 
-### Binary Targets (`Cargo.toml`)
-1. **`sys-chronicle`** (`src/main.rs`): Main executable. Runs background telemetry daemon, launches Ratatui TUI, generates AI export prompts, and installs the user systemd service.
-2. **`sys-chronicle-mal`** (`src/bin/mal.rs`): Official companion binary. Handles MAL OAuth2 PKCE login, status checking, filename parsing tests, manual sync, and runs as an event-driven plugin hook receiving JSON on `stdin`.
-3. **`sys_chronicle`** (`src/lib.rs`): Shared internal library exposing modules to both binaries and test suites.
+## 2. Global Constraints & Architecture Patterns
+- **Primary Language**: Rust 2021 edition
+- **Architectural Paradigm**: Role-based (domain/, infra/, api/cli/, tui/)
+- **Hard Constraints**: <400 lines/file, <60 lines/fn, zero production unwrap(), 0 warnings.
+- **Target Distribution**: Linux x86_64 standalone binary
 
----
+## 3. Module & Interface Skeleton
 
-## 📁 Source File Tree & Responsibilities
+### `src/bin/mal.rs` (Role: general, Lines: 392)
+- **Responsibility**: Core general logic in src/bin/mal.rs
+- **Imports**: use anyhow :: { Context , Result } , use chrono :: { DateTime , Local , TimeZone } , use clap :: { Parser , Subcommand } , use std :: env , use std :: io :: { self , IsTerminal , Write } , use sys_chronicle :: mal :: { AnimeParser , GeminiParser , MalAuth , MalClient , MalHandler } 
 
-| Path | Primary Structs / Functions | Responsibilities & Logic |
-| :--- | :--- | :--- |
-| `src/main.rs` | `Cli`, `Commands`, `main()` | CLI parsing (`clap`), initializes Tokiomultitask daemon (`Window`, `Power`, `Metrics`, `Mpv`), dispatches `status`, `summary`, `export`, and `install-service`. |
-| `src/lib.rs` | Public module exports | Re-exports `exporter`, `logger`, `mal`, `monitor`, `plugin`, `service`, `tui`. |
-| `src/bin/mal.rs` | `Cli`, `Commands`, `run_login()`, `run_status()`, `run_sync()`, `run_map()` | Companion binary CLI. Handles OAuth PKCE setup, status check, test parsing, manual/forced MAL sync, folder→MAL mapping (`map --id/--list/--remove/--json`), and plugin hook stdin pipe. |
-| **`src/logger/`** | | |
-| `src/logger/mod.rs` | `ActivityEvent`, `LogWriter` | Module definitions and re-exports. |
-| `src/logger/event.rs` | `ActivityEvent` (enum) | Tagged serde JSON event definitions: `WindowFocus`, `PowerState`, `SystemMetrics`, `MediaPlayback`, `MediaWatchThreshold`. |
-| `src/logger/writer.rs` | `LogWriter` | Rolling daily JSONL file storage (`~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl`). Read and query functions by date and date ranges. |
-| **`src/monitor/`** | | |
-| `src/monitor/mod.rs` | Re-exports | Exports monitors, `PlaybackInterval`, and tracker types. |
-| `src/monitor/window.rs` | `WindowMonitor`, `HyprActiveWindow` | Connects to Hyprland IPC `.socket2.sock`. Listens for `activewindow>>` and `windowtitle>>`. Computes dwell duration on switch. Falls back to `hyprctl activewindow -j` polling if socket drops. |
-| `src/monitor/power.rs` | `PowerMonitor`, `PowerState` | Inspects `/sys/class/power_supply` for `BAT*` (capacity, status, `health_pct`, `cycle_count`) and `AC*`/`ADP*` (online). Emits events on state shift, $\ge 2\%$ change, or 5-min heartbeat. |
-| `src/monitor/metrics.rs` | `MetricsMonitor`, `MetricsSnapshot`, `AppDetail` (re-export) | Telemetry coordinator. Samples CPU/RAM utilization and reads `/sys/class/hwmon` for CPU package temp and fan RPM. Delegates process metrics to `process.rs`. |
-| `src/monitor/process.rs` | `AppDetail`, `collect_app_details()`, `resolve_process_identity()`, `is_interpreter()` | Process sampler and identity resolver. Unmasks script interpreters (Python, Node, Bash, etc.) to report actual tool names (`udiskie`, `uwsm`), extracts command lines, and deduplicates main process TGIDs via `/proc/{pid}/status`. |
-| `src/monitor/mpv.rs` | `MpvMonitor`, `MpvEvent` | Connects to MPV Unix domain socket (`/tmp/mpvsocket`, `$XDG_RUNTIME_DIR/mpvsocket`). Observes properties (`media-title`, `path`, `pause`, `time-pos`, `duration`). Dispatches events to writer and plugins. |
-| `src/monitor/mpv_session.rs`| `MpvPlaybackSession`, `MpvProgressParams` | Maintains active MPV session state machine. Detects title/path transitions, pause/resume, seek forward/backward ($>5$s), updates `UniqueTimelineTracker`, debounces sync to `AnimeSyncHistory` every 3s. |
-| `src/monitor/timeline_tracker.rs` | `UniqueTimelineTracker`, `PlaybackInterval` | **Anti-cheat watch calculation**. Merges disjoint playback intervals `[start..end]`. Calculates `total_unique_secs / duration`. Triggers 80% threshold exactly once. Rejects scrubbing and looping exploits. |
-| **`src/mal/`** | | |
-| `src/mal.rs` | Module re-exports | Exposes all MAL client, auth, parser, and history interfaces. |
-| `src/mal/auth.rs` | `MalAuth`, `MalConfig`, `TokenResponse` | MAL OAuth2 PKCE flow. Spins up temporary local server on `127.0.0.1:8080/callback`. Auto-refreshes tokens expiring within 5 min. Config stored in `~/.config/sys-chronicle/mal_config.json`. |
-| `src/mal/candidate.rs` | `select_best_candidate()`, `score_candidate()`, `build_search_queries()`, `season_from_path()`, `detect_season_and_type()`, `seed_query_from_title()` | Media-type-aware candidate matching. `seed_query_from_title()` builds the picker's starting query: strips media extensions, `[release]` tags, episode markers, trailing years and dangling articles, and converts punctuation to spaces so `Laid-Back Camp` seeds `laid back camp` (MAL literal search returns 0 for the hyphen-collapsed `laidback camp`). Uses MAL `media_type` (not title keywords) to hard-exclude specials/movies for series queries and mismatched seasons (returns `None`, never a wrong fallback). Scores title/synonym similarity, list presence, season. `build_search_queries()` emits base + `"<title> Season N"` queries (deduped). `season_from_path()` recovers the season from folders like `Season 03`. |
-| `src/mal/classifier.rs` | `AnimeClassifier`, `MediaClassification` | Filters non-syncable content (bonus extras, creditless OP/EDs, live-action footage, trailers, disc menus) using directory heuristics and Gemini 3.1 Flash-Lite AI classifier. |
-| `src/mal/client.rs` | `MalClient`, `MalAnimeNode`, `AlternativeTitles`, `MediaKind`, `UserProfile`, `UserListStatus` | Reqwest HTTP client for MyAnimeList API v2 (`/users/@me`, `/anime?q=...`, `/anime/{id}`, `/anime/{id}/my_list_status`). Requests `media_type` + `alternative_titles` (`en`/`ja`/`synonyms`); `all_titles()` and `media_kind()` feed candidate scoring. `get_anime(id)` resolves manual overrides. |
-| `src/mal/overrides.rs` | `AnimeOverrides`, `AnimeOverride`, `reassign_history()` | Manual folder-scoped MAL bindings in `~/.local/share/sys-chronicle/anime_overrides.json`. Longest-ancestor-prefix lookup keyed by canonical folder, optional `specials_mal_anime_id` for special/other files. `reassign_history()` rewrites existing records so a corrected binding applies immediately. |
-| `src/mal/resolver.rs` | `resolve_anime()`, `resolve_from_override()`, `ResolvedAnime` | Resolution pipeline: manual folder override first, otherwise merge results from every query in `build_search_queries()` (deduped by MAL id) and select once. Falls back to `season_from_path()` when AI omits the season. |
-| `src/mal/gemini.rs` | `GeminiParser`, `GeminiClassification` | Google Gemini 3.1 Flash-Lite REST client. Uses structured output (`responseSchema`) to extract canonical titles, episode numbers, and non-syncable classifications. |
-| `src/mal/handler.rs` | `MalHandler` | Central scrobbler coordinator. Handles stdin JSON hook, 80% threshold events, classification, candidate search, "Ahead-of-MAL" downgrade guard, and `notify-send` desktop alerts. |
-| `src/mal/history.rs` | `AnimeSyncHistory`, `AnimeSyncRecord`, `SyncStatus`, `higher_status()` | Local persistent state in `~/.local/share/sys-chronicle/anime_sync_history.json`. Tracks playback intervals, position, watch %, and MAL status badges. `upsert` merges intervals and preserves max `watched_secs`/`watch_pct` — never regresses progress on re-open. `higher_status` ranks `Synced > AheadOnMal > ThresholdMet > Watching`. |
-| `src/mal/parser.rs` | `AnimeParser`, `AnimeInfo` | Offline regex title/episode/season extractor. Strips release group tags (`[SubsPlease]`), hashes, resolutions (`1080p`), and codecs. Handles diverse anime file naming conventions. |
-| **`src/tui/`** | | |
-| `src/tui.rs` | `run_status_tui()`, `App` | Full Ratatui TUI dashboard. 3 tabs, state management, search (`/`), sort (`s`/`o`), limit (`t`), pause (`p`), AI export modal (`e`), process kill modal (`K`). |
-| `src/tui/media_tab.rs` | `render_media_tab()`, `MediaTabState`, `GroupMode`, `MediaRow` | Tab 3 layout: anime list pane (left) + media inspector pane (right), force sync modal confirmation. Groups watching sessions temporally by **Day / Week / Month / Flat** (`g` cycles), inserting non-selectable magenta section headers. All title truncation is char-safe via `truncate_name` (no byte slicing). |
-| `src/tui/media_inspector.rs`| `render_anime_inspector()`, `render_force_sync_modal()` | Detailed inspector view: metadata, dual progress bars (Seek Head vs Anti-Cheat Unique Watched), status badge explanation. |
-| `src/tui/media_picker.rs`| `MediaPickerState`, `render_media_picker()` | Folder→MAL picker modal (`m`). Debounced (300 ms) search on one long-lived worker thread fed by `mpsc` channels; the worker drains the queue and only serves the newest request, so stale responses cannot clobber fresh ones. `tick()` fires the debounced request, `poll()` drains outcomes and drops any generation mismatch. `Enter` re-queries when results are empty and binds otherwise; `Ctrl+R` always re-queries. |
-| **`src/exporter/`** | | |
-| `src/exporter/mod.rs` | Re-exports | Re-exports `generate_ai_report`. |
-| `src/exporter/ai.rs` | `generate_ai_report()` | Formats daily JSONL activity logs into a Markdown prompt with app usage, timeline intervals, brief focus buckets (<5s), battery discharge deltas, and CPU/RAM load. |
-| `src/plugin.rs` | `PluginDispatcher` | Plugin discovery and execution engine. Reads executables in `~/.config/sys-chronicle/plugins/`, pipes JSON events over `stdin` asynchronously with a 30s timeout. |
-| `src/service.rs` | `install_user_service()` | Generates `sys-chronicle.service` in `~/.config/systemd/user/` and enables/starts it via `systemctl --user`. |
-| `install.sh` | Shell installer script | Builds or downloads binary, copies to `~/.local/bin/`, symlinks companion plugin, and starts systemd service. |
-
----
-
-## 💾 Storage Layout & Configuration Files
-
-| Purpose | Path | Format |
-| :--- | :--- | :--- |
-| **Activity Logs** | `~/.local/share/sys-chronicle/logs/activity-YYYY-MM-DD.jsonl` | Rolling JSON Lines |
-| **MAL Sync State** | `~/.local/share/sys-chronicle/anime_sync_history.json` | JSON Array of `AnimeSyncRecord` |
-| **MAL Folder Overrides** | `~/.local/share/sys-chronicle/anime_overrides.json` | JSON Array of `AnimeOverride` (folder keyed) |
-| **MAL OAuth & AI Config** | `~/.config/sys-chronicle/mal_config.json` | JSON Object (`client_id`, tokens, keys) |
-| **Plugin Directory** | `~/.config/sys-chronicle/plugins/` | Executable files / symlinks |
-| **Systemd User Unit** | `~/.config/systemd/user/sys-chronicle.service` | Systemd service unit file |
-
----
-
-## 📡 IPC Protocols & Socket Contracts
-
-### 1. Hyprland Wayland IPC (`WindowMonitor`)
-- **Socket Discovery**: Searches `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`. If environment variable is absent, scans `$XDG_RUNTIME_DIR/hypr/` for directories containing `.socket2.sock`.
-- **Events Read**:
-  - `activewindow>>[class],[title]`: Emitted on active window switch. Dwell duration of previous window is calculated and logged.
-  - `windowtitle>>[title]`: Emitted when focused window title updates (e.g., browser tab change).
-- **Fallback**: If socket is unavailable or disconnects, polls `hyprctl activewindow -j` every 2 seconds.
-
-### 2. MPV JSON IPC (`MpvMonitor`)
-- **Socket Discovery**: Probes `/tmp/mpvsocket`, `$XDG_RUNTIME_DIR/mpvsocket`, `$XDG_RUNTIME_DIR/mpv.sock`, and `~/.config/mpv/socket`.
-- **Initialization Command**:
-  ```json
-  {"command": ["observe_property", 1, "media-title"]}
-  {"command": ["observe_property", 2, "path"]}
-  {"command": ["observe_property", 3, "pause"]}
-  {"command": ["observe_property", 4, "time-pos"]}
-  {"command": ["observe_property", 5, "duration"]}
+### `src/exporter/ai.rs` (Role: general, Lines: 455)
+- **Responsibility**: Core general logic in src/exporter/ai.rs
+- **Imports**: use std :: collections :: BTreeMap , use crate :: logger :: ActivityEvent 
+- **Public Functions & Signatures**:
+  ```rust
+  fn generate_ai_report (events : & [ActivityEvent] , title_date : & str) -> String
   ```
-- **Events Dispatched**:
-  - `ActivityEvent::MediaPlayback`: On start, stop, pause, resume, seek_forward, seek_backward.
-  - `ActivityEvent::MediaWatchThreshold`: Emitted once when unique timeline coverage reaches $\ge 80\%$.
 
-### 3. Plugin Dispatch Protocol (`PluginDispatcher`)
-- **Location**: `~/.config/sys-chronicle/plugins/` (scans all files with executable permissions `0o111`).
-- **Contract**: Daemon serializes `ActivityEvent` to JSON and pipes it directly into the plugin process's `stdin`. Output is ignored; errors on `stderr` are logged. Execution is governed by a 30-second timeout.
+### `src/exporter/mod.rs` (Role: general, Lines: 3)
+- **Responsibility**: Core general logic in src/exporter/mod.rs
+- **Imports**: pub use ai :: generate_ai_report 
 
-### 4. MyAnimeList OAuth2 PKCE Callback (`MalAuth`)
-- **Endpoint**: Local HTTP listener bound temporarily to `127.0.0.1:8080`.
-- **Redirect URI**: `http://localhost:8080/callback`.
-- **PKCE**: 128-char random alphanumeric verifier with plain code challenge method. Automatically exchanges auth code for access and refresh tokens.
+### `src/lib.rs` (Role: general, Lines: 7)
+- **Responsibility**: Core general logic in src/lib.rs
 
----
+### `src/logger/event.rs` (Role: general, Lines: 64)
+- **Responsibility**: Core general logic in src/logger/event.rs
+- **Imports**: use serde :: { Deserialize , Serialize } 
+- **Types & Enums**:
+  ```rust
+  pub enum ActivityEvent
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn timestamp (& self) -> & str
+  ```
 
-## 📜 Log Schema: `ActivityEvent` (JSONL)
+### `src/logger/mod.rs` (Role: general, Lines: 5)
+- **Responsibility**: Core general logic in src/logger/mod.rs
+- **Imports**: pub use event :: ActivityEvent , pub use writer :: LogWriter 
 
-All events written to `activity-YYYY-MM-DD.jsonl` are tagged with `"type"`:
+### `src/logger/writer.rs` (Role: general, Lines: 110)
+- **Responsibility**: Core general logic in src/logger/writer.rs
+- **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use std :: fs :: { create_dir_all , OpenOptions } , use std :: io :: Write , use std :: path :: PathBuf , use super :: event :: ActivityEvent 
+- **Types & Enums**:
+  ```rust
+  pub struct LogWriter
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new () -> Result < Self >
+  fn get_logs_dir () -> PathBuf
+  fn write_event (& self , event : & ActivityEvent) -> Result < () >
+  fn read_events_for_date (date_str : & str) -> Result < Vec < ActivityEvent > >
+  fn read_recent_events (days : usize) -> Result < Vec < ActivityEvent > >
+  fn read_events_for_date_range (start_date : & str , end_date : & str ,) -> Result < Vec < ActivityEvent > >
+  ```
 
-### 1. `window_focus`
-```json
-{
-  "type": "window_focus",
-  "timestamp": "2026-09-13T18:00:00.123+05:30",
-  "app_class": "kitty",
-  "title": "nvim src/main.rs",
-  "duration_secs": 42
-}
-```
-*(Note: `duration_secs` is `null` on entry and populated when the window loses focus.)*
+### `src/main.rs` (Role: general, Lines: 221)
+- **Responsibility**: Core general logic in src/main.rs
+- **Imports**: use anyhow :: Result , use chrono :: Local , use clap :: { ArgAction , Parser , Subcommand } , use std :: io :: IsTerminal , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: System , use tokio :: signal , use exporter :: generate_ai_report , use logger :: LogWriter , use monitor :: { MetricsMonitor , MpvMonitor , PowerMonitor , WindowMonitor } 
 
-### 2. `power_state`
-```json
-{
-  "type": "power_state",
-  "timestamp": "2026-09-13T18:00:00.123+05:30",
-  "status": "Discharging",
-  "capacity": 85,
-  "ac_online": false,
-  "health_pct": 82.5,
-  "cycle_count": 215
-}
-```
+### `src/mal/auth.rs` (Role: general, Lines: 312)
+- **Responsibility**: Core general logic in src/mal/auth.rs
+- **Imports**: use anyhow :: { Context , Result } , use chrono :: { Duration as ChronoDuration , Local } , use rand :: { distributions :: Alphanumeric , Rng } , use reqwest :: Client , use serde :: { Deserialize , Serialize } , use std :: fs , use std :: path :: PathBuf , use std :: process :: Command , use tokio :: io :: { AsyncReadExt , AsyncWriteExt } , use tokio :: net :: TcpListener , use url :: Url 
+- **Types & Enums**:
+  ```rust
+  pub struct MalConfig
+  pub struct MalAuth
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn is_deepseek_enabled (& self) -> bool
+  fn get_deepseek_url (& self) -> String
+  fn get_deepseek_model (& self) -> String
+  fn get_deepseek_key (& self) -> String
+  fn get_gemini_model (& self) -> String
+  fn config_path () -> PathBuf
+  fn load_config () -> Result < MalConfig >
+  fn save_config (config : & MalConfig) -> Result < () >
+  fn generate_code_verifier () -> String
+  async fn login (client_id : String , client_secret : Option < String > , gemini_api_key : Option < String > ,) -> Result < () >
+  async fn get_valid_token (config : & mut MalConfig) -> Result < String >
+  ```
 
-### 3. `system_metrics`
-```json
-{
-  "type": "system_metrics",
-  "timestamp": "2026-09-13T18:00:00.123+05:30",
-  "cpu_pct": 14.2,
-  "ram_used_mb": 4096,
-  "ram_total_mb": 32000,
-  "ram_pct": 12.8,
-  "top_apps": ["firefox (1200 MB)", "kitty (350 MB)"]
-}
-```
+### `src/mal/candidate.rs` (Role: general, Lines: 488)
+- **Responsibility**: Core general logic in src/mal/candidate.rs
+- **Imports**: use super :: client :: { MalAnimeNode , MediaKind } , use regex :: Regex 
+- **Types & Enums**:
+  ```rust
+  pub struct ScoredCandidate
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn normalize_for_comparison (s : & str) -> String
+  fn detect_season_and_type (title : & str) -> (Option < u32 > , bool , bool)
+  fn strip_season_and_type_tags (normalized : & str) -> String
+  fn seed_query_from_title (title : & str) -> String
+  fn season_from_path (media_path : & str) -> Option < u32 >
+  fn score_candidate (candidate : & MalAnimeNode , query_title : & str , target_season : Option < u32 > , query_kind : MediaKind ,) -> Option < i32 >
+  fn build_search_queries (title : & str , season : Option < u32 >) -> Vec < String >
+  fn select_best_candidate < 'a > (candidates : & 'a [MalAnimeNode] , query_title : & str , target_season : Option < u32 > ,) -> Option < & 'a MalAnimeNode >
+  ```
 
-### 4. `media_playback`
-```json
-{
-  "type": "media_playback",
-  "timestamp": "2026-09-13T18:00:00.123+05:30",
-  "player": "mpv",
-  "event_type": "start",
-  "title": "Sousou no Frieren - 04",
-  "path": "/home/user/Videos/Sousou no Frieren - 04.mkv",
-  "position_secs": 0,
-  "duration_secs": 1440
-}
-```
+### `src/mal/classifier.rs` (Role: general, Lines: 201)
+- **Responsibility**: Core general logic in src/mal/classifier.rs
+- **Imports**: use anyhow :: Result , use regex :: Regex , use std :: path :: Path , use super :: gemini :: GeminiParser , use super :: parser :: AnimeInfo 
+- **Types & Enums**:
+  ```rust
+  pub enum MediaClassification
+  pub struct AnimeClassifier
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn check_local_heuristics (raw_path_or_title : & str) -> Option < MediaClassification >
+  async fn classify (raw_path_or_title : & str , gemini : Option < & GeminiParser > ,) -> Result < Option < MediaClassification > >
+  ```
 
-### 5. `media_watch_threshold`
-```json
-{
-  "type": "media_watch_threshold",
-  "timestamp": "2026-09-13T18:19:13.123+05:30",
-  "player": "mpv",
-  "title": "Sousou no Frieren - 04",
-  "path": "/home/user/Videos/Sousou no Frieren - 04.mkv",
-  "duration_secs": 1440,
-  "watched_secs": 1152,
-  "watch_pct": 80.0
-}
-```
+### `src/mal/client.rs` (Role: cli, Lines: 205)
+- **Responsibility**: Core cli logic in src/mal/client.rs
+- **Imports**: use anyhow :: { Context , Result } , use reqwest :: { header , Client } , use serde :: { Deserialize , Serialize } 
+- **Types & Enums**:
+  ```rust
+  pub struct MalAnimeNode
+  pub struct AlternativeTitles
+  pub enum MediaKind
+  pub struct MalAnimeData
+  pub struct MalSearchResponse
+  pub struct UserListStatus
+  pub struct UserProfile
+  pub struct MalClient
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn all_titles (& self) -> Vec < & str >
+  fn media_kind (& self) -> MediaKind
+  fn new (token : String) -> Result < Self >
+  fn token (& self) -> & str
+  async fn get_current_user (& self) -> Result < UserProfile >
+  async fn search_anime (& self , query : & str) -> Result < Vec < MalAnimeNode > >
+  async fn search_anime_limited (& self , query : & str , limit : u32) -> Result < Vec < MalAnimeNode > >
+  async fn get_anime (& self , anime_id : u64) -> Result < MalAnimeNode >
+  async fn update_episode_progress (& self , anime_id : u64 , episode : u32 , total_episodes : u32 ,) -> Result < UserListStatus >
+  ```
 
----
+### `src/mal/gemini.rs` (Role: general, Lines: 435)
+- **Responsibility**: Core general logic in src/mal/gemini.rs
+- **Imports**: use anyhow :: { Context , Result } , use reqwest :: Client , use serde :: { Deserialize , Serialize } , use std :: time :: Duration , use super :: parser :: AnimeInfo 
+- **Types & Enums**:
+  ```rust
+  pub struct GeminiClassification
+  pub struct GeminiParser
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new (api_key : String , model_override : Option < String >) -> Result < Self >
+  fn from_config (config : & super :: auth :: MalConfig) -> Result < Self >
+  async fn classify (& self , raw_input : & str) -> Result < Option < GeminiClassification > >
+  async fn parse (& self , raw_input : & str) -> Result < Option < AnimeInfo > >
+  ```
 
-## 🧮 Algorithms & Core Logic
+### `src/mal/handler.rs` (Role: general, Lines: 377)
+- **Responsibility**: Core general logic in src/mal/handler.rs
+- **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use std :: io :: { self , Read } , use std :: process :: Command , use super :: auth :: MalAuth , use super :: client :: MalClient , use super :: gemini :: GeminiParser , use super :: history :: { AnimeSyncHistory , AnimeSyncRecord , SyncStatus } , use super :: parser :: AnimeParser , use crate :: logger :: ActivityEvent 
+- **Types & Enums**:
+  ```rust
+  pub struct MalHandler
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  async fn handle_stdin_hook () -> Result < () >
+  async fn sync_media (raw_media : & str) -> Result < () >
+  async fn sync_media_with_options (raw_media : & str , duration_secs : u64 , watched_secs : u64 , force : bool ,) -> Result < Option < AnimeSyncRecord > >
+  ```
 
-### 1. Anti-Cheat Unique Playback Coverage (`UniqueTimelineTracker`)
-- **Position Tracking**: When `time-pos` increments by $\le 3$s in unpaused state, an interval `[prev_pos..current_pos]` is recorded.
-- **Interval Merging (`merge_intervals`)**:
-  - Sorts intervals by `start`.
-  - For adjacent or overlapping intervals where `interval.start <= last.end`, updates `last.end = max(last.end, interval.end)`.
-- **Metrics**:
-  - `total_unique_secs = sum(end - start) for all merged intervals`.
-  - `coverage_pct = (total_unique_secs / duration_secs) * 100.0` (clamped to 100%).
-- **Threshold**: When `coverage_pct >= 80.0%`, threshold event fires exactly once per media key.
+### `src/mal/history/tests.rs` (Role: general, Lines: 300)
+- **Responsibility**: Core general logic in src/mal/history/tests.rs
+- **Imports**: use super :: * 
 
-### 2. Candidate Matching (`candidate.rs` + `resolver.rs`)
-**Search**: `build_search_queries(Q, S)` emits `Q`, a tag-stripped variant when the title carries a tag, and `"<stem> Season S"` when `S > 1` (deduped). `resolver::resolve_anime()` merges results from every query (deduped by MAL id) before scoring once. When AI omits the season, `season_from_path()` recovers it from the folder (`Season 03`, `S03`).
+### `src/mal/history.rs` (Role: general, Lines: 483)
+- **Responsibility**: Core general logic in src/mal/history.rs
+- **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use serde :: { Deserialize , Serialize } , use std :: fs :: { create_dir_all , OpenOptions } , use std :: io :: Write , use std :: path :: PathBuf , use crate :: monitor :: PlaybackInterval 
+- **Types & Enums**:
+  ```rust
+  pub enum SyncStatus
+  pub struct AnimeSyncRecord
+  pub struct ProgressUpdateParams
+  pub struct AnimeSyncHistory
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn badge (& self) -> (& 'static str , ratatui :: style :: Color)
+  fn storage_path () -> PathBuf
+  fn deduplicate (records : Vec < AnimeSyncRecord >) -> Vec < AnimeSyncRecord >
+  fn load_all () -> Result < Vec < AnimeSyncRecord > >
+  fn save_all (records : & [AnimeSyncRecord]) -> Result < () >
+  fn upsert (record : AnimeSyncRecord) -> Result < () >
+  fn find_record (raw_title : & str , canonical_title : & str , episode : u32 ,) -> Option < AnimeSyncRecord >
+  fn update_progress_full (params : ProgressUpdateParams < '_ >) -> Result < () >
+  fn update_progress (raw_title : & str , canonical_title : & str , episode : u32 , path : Option < String > , duration_secs : u64 , watched_secs : u64 ,) -> Result < () >
+  ```
 
-**Hard exclusions** (candidate returns `None`, no fallback):
-- Series query: MAL `media_type` of `special`/`ova`/`ona`/`movie` is rejected.
-- Special query: only `special`/`ova`/`ona` accepted. Movie query: only `movie`.
-- Known target season: a candidate whose season differs is rejected.
+### `src/mal/overrides.rs` (Role: general, Lines: 287)
+- **Responsibility**: Core general logic in src/mal/overrides.rs
+- **Imports**: use anyhow :: { Context , Result } , use serde :: { Deserialize , Serialize } , use std :: fs :: OpenOptions , use std :: io :: Write , use std :: path :: { Path , PathBuf } , use super :: history :: { AnimeSyncHistory , AnimeSyncRecord } 
+- **Types & Enums**:
+  ```rust
+  pub struct AnimeOverride
+  pub struct AnimeOverrides
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn id_for (& self , file_name : & str) -> u64
+  fn storage_path () -> PathBuf
+  fn load () -> Result < Self >
+  fn entries (& self) -> & [AnimeOverride]
+  fn save (& self) -> Result < () >
+  fn set (& mut self , folder : & Path , mal_anime_id : u64 , canonical_title : & str , total_episodes : Option < u32 > ,) -> AnimeOverride
+  fn remove (& mut self , folder : & Path) -> Option < AnimeOverride >
+  fn lookup (& self , media_path : & str) -> Option < & AnimeOverride >
+  fn reassign_history (folder : & Path , mal_anime_id : u64 , canonical_title : & str , total_episodes : Option < u32 > ,) -> Result < usize >
+  ```
 
-**Score** (best over `title` + `en` + `ja` + `synonyms`):
-- Full base match: `+150`, prefix: `+80`, substring: `+40`.
-- Season match: `+100`. No target season and season ≠ 1: `-100`.
-- In user's list: `+50` (`+20` if `num_episodes_watched > 0`).
-- Length penalty: `-min(30, abs(len(C) - len(Q)))`.
+### `src/mal/parser.rs` (Role: general, Lines: 175)
+- **Responsibility**: Core general logic in src/mal/parser.rs
+- **Imports**: use regex :: Regex , use std :: path :: Path 
+- **Types & Enums**:
+  ```rust
+  pub struct AnimeInfo
+  pub struct AnimeParser
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn parse (raw_name : & str) -> Option < AnimeInfo >
+  ```
 
-**Folder override** (`overrides.rs`): a stored binding wins over search unconditionally, matched by longest ancestor prefix of the file's parent folder, so renamed files and specials inside that folder inherit it. `map` also rewrites existing history rows.
+### `src/mal/resolver.rs` (Role: general, Lines: 129)
+- **Responsibility**: Core general logic in src/mal/resolver.rs
+- **Imports**: use anyhow :: Result , use super :: candidate :: { build_search_queries , season_from_path , select_best_candidate } , use super :: client :: { MalAnimeNode , MalClient } , use super :: overrides :: AnimeOverrides , use super :: parser :: AnimeInfo 
+- **Types & Enums**:
+  ```rust
+  pub struct ResolvedAnime
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  async fn resolve_anime (client : & MalClient , media_path : & str , info : & AnimeInfo ,) -> Result < Option < ResolvedAnime > >
+  async fn resolve_from_override (client : & MalClient , media_path : & str ,) -> Result < Option < ResolvedAnime > >
+  ```
 
-> Malformed JSON field names were a real bug: MAL returns `alternative_titles.en` / `.ja`, so those serde keys must be renamed or every English title is dropped.
+### `src/mal.rs` (Role: general, Lines: 21)
+- **Responsibility**: Core general logic in src/mal.rs
+- **Imports**: pub use auth :: MalAuth , pub use candidate :: select_best_candidate , pub use classifier :: { AnimeClassifier , MediaClassification } , pub use client :: MalClient , pub use gemini :: GeminiParser , pub use handler :: MalHandler , pub use history :: { AnimeSyncHistory , AnimeSyncRecord , SyncStatus } , pub use overrides :: { AnimeOverride , AnimeOverrides } , pub use parser :: { AnimeInfo , AnimeParser } , pub use resolver :: { resolve_anime , ResolvedAnime } 
 
-### 3. Ahead-of-MAL Downgrade Guard (`handler.rs`)
-- Compares `info.episode` against user's current MAL watched episode count.
-- If `mal_current_ep > info.episode` and `force == false`:
-  - **Does NOT** call MAL API update.
-  - Flags record as `SyncStatus::AheadOnMal { mal_episode }`.
-  - Sends desktop notification informing user that progress was preserved.
-  - Can only be overridden with `sys-chronicle-mal sync <NAME> --force` or pressing `f` in the TUI confirmation modal.
+### `src/monitor/metrics.rs` (Role: general, Lines: 189)
+- **Responsibility**: Core general logic in src/monitor/metrics.rs
+- **Imports**: use anyhow :: Result , use chrono :: Local , use std :: fs , use std :: path :: Path , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: { CpuRefreshKind , ProcessRefreshKind , System } , use tokio :: time :: { sleep , Duration } , use super :: process :: collect_app_details , pub use super :: process :: AppDetail , use crate :: logger :: { ActivityEvent , LogWriter } 
+- **Types & Enums**:
+  ```rust
+  pub struct MetricsSnapshot
+  pub struct MetricsMonitor
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new (writer : LogWriter , interval_secs : u64) -> Self
+  fn sample_metrics (sys : & mut System) -> MetricsSnapshot
+  async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
+  ```
 
----
+### `src/monitor/mod.rs` (Role: general, Lines: 13)
+- **Responsibility**: Core general logic in src/monitor/mod.rs
+- **Imports**: pub use metrics :: MetricsMonitor , pub use mpv :: MpvMonitor , pub use power :: PowerMonitor , pub use timeline_tracker :: PlaybackInterval , pub use window :: WindowMonitor 
 
-## ⌨️ TUI Architecture & Keymaps
+### `src/monitor/mpv.rs` (Role: general, Lines: 252)
+- **Responsibility**: Core general logic in src/monitor/mpv.rs
+- **Imports**: use anyhow :: Result , use chrono :: Local , use serde :: Deserialize , use std :: env , use std :: path :: { Path , PathBuf } , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use tokio :: io :: { AsyncBufReadExt , AsyncWriteExt , BufReader } , use tokio :: net :: UnixStream , use tokio :: time :: { sleep , Duration } , use crate :: logger :: { ActivityEvent , LogWriter } , use super :: mpv_session :: MpvPlaybackSession 
+- **Types & Enums**:
+  ```rust
+  pub struct MpvMonitor
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new (writer : LogWriter) -> Self
+  async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
+  ```
 
-The TUI operates on a 250ms tick loop rendering via `ratatui` with `CrosstermBackend`.
+### `src/monitor/mpv_session.rs` (Role: general, Lines: 266)
+- **Responsibility**: Core general logic in src/monitor/mpv_session.rs
+- **Imports**: use chrono :: Local , use std :: path :: Path , use crate :: mal :: history :: ProgressUpdateParams , use crate :: mal :: { AnimeParser , AnimeSyncHistory , SyncStatus } , use crate :: monitor :: mpv :: MpvMonitor , use crate :: monitor :: timeline_tracker :: { PlaybackInterval , UniqueTimelineTracker } 
+- **Types & Enums**:
+  ```rust
+  pub struct MpvProgressParams
+  pub struct MpvPlaybackSession
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new () -> Self
+  fn transition_media (& mut self , monitor : & MpvMonitor , new_title : String , new_path : Option < String > ,)
+  fn update_title (& mut self , monitor : & MpvMonitor , new_title : String)
+  fn update_path (& mut self , monitor : & MpvMonitor , new_path_str : String)
+  fn update_pause (& mut self , monitor : & MpvMonitor , paused : bool)
+  fn update_time_pos (& mut self , monitor : & MpvMonitor , pos_num : f64)
+  fn update_duration (& mut self , dur_num : f64)
+  fn finish (& mut self , monitor : & MpvMonitor)
+  fn sync_history (& self)
+  fn sync_history_progress (params : MpvProgressParams < '_ >)
+  ```
 
-### Views
-1. **Live Dashboard (`ActiveTab::Live`)**:
-   - Gauges: Global CPU load, RAM utilization.
-   - Hardware: CPU package temperature and fan RPM scraped from `/sys/class/hwmon`.
-   - Active Window: Focused window class and title.
-   - Interactive Process Table: Deduplicated RSS memory and CPU usage per executable.
-2. **Daily Analytics (`ActiveTab::Analytics`)**:
-   - Aggregated screen time per application for the current day computed from JSONL focus intervals.
-3. **Anime & MAL Chronicle (`ActiveTab::MediaSync`)**:
-   - Left: Scrollable anime playback history with status badges (`✔ SYNCED`, `⏩ MAL AHEAD`, `▶ WATCHING`, `🎬 LIVE-ACT`).
-   - Right: Media inspector with seek head gauge vs anti-cheat unique watched gauge, episode details, and action shortcuts.
+### `src/monitor/power.rs` (Role: general, Lines: 202)
+- **Responsibility**: Core general logic in src/monitor/power.rs
+- **Imports**: use anyhow :: Result , use chrono :: Local , use std :: fs , use std :: path :: Path , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use tokio :: time :: { sleep , Duration } , use crate :: logger :: { ActivityEvent , LogWriter } 
+- **Types & Enums**:
+  ```rust
+  pub struct PowerState
+  pub struct PowerMonitor
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new (writer : LogWriter) -> Self
+  fn read_current_state () -> Option < PowerState >
+  async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
+  ```
 
-### Global & Contextual Keybindings
-| Key | Context | Action |
-| :---: | :--- | :--- |
-| **`Tab`** | Global | Cycle views (`Live` ➔ `Analytics` ➔ `MediaSync`) |
-| **`q`** / **`Esc`** | Global | Close modal or exit TUI |
-| **`/`** | Live / Analytics | Enter fuzzy search filter mode |
-| **`K`** | Live | Open red confirmation modal to terminate selected app (`SIGTERM`) |
-| **`e`** | Global | Open AI export modal (Today, Yesterday, Last 7d, Last 30d, Date, Range) |
-| **`s`** / **`Enter`** | Live | Toggle sort metric between RAM and CPU |
-| **`s`** / **`Enter`** | MediaSync | Trigger manual background MAL sync for selected anime |
-| **`f`** | MediaSync | Open force overwrite confirmation modal (overrides `AheadOnMal`) |
-| **`m`** | MediaSync | Open folder→MAL picker modal (search MAL, `↑/↓` select, `Enter` bind folder, `Esc` cancel) |
-| **`r`** | MediaSync | Reload playback history from disk |
-| **`g`** | MediaSync | Cycle temporal grouping of watching sessions (`Day` ➔ `Week` ➔ `Month` ➔ `Flat`) |
-| **`o`** | Live / Analytics | Toggle sort direction (`Descending ↓` ↔ `Ascending ↑`) |
-| **`t`** | Live / Analytics | Cycle process list limit (`10` ➔ `25` ➔ `All`) |
-| **`p`** | Live | Pause / resume live metric sampling with frozen timestamp badge |
+### `src/monitor/process.rs` (Role: general, Lines: 279)
+- **Responsibility**: Core general logic in src/monitor/process.rs
+- **Imports**: use serde :: { Deserialize , Serialize } , use std :: collections :: { BTreeMap , HashSet } , use std :: fs , use std :: path :: Path , use sysinfo :: { Process , System } 
+- **Types & Enums**:
+  ```rust
+  pub struct AppDetail
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn is_interpreter (name : & str) -> bool
+  fn extract_script_name (cmd : & [String]) -> Option < String >
+  fn resolve_process_identity (p : & Process) -> (String , String , String)
+  fn get_proc_status_info (pid : u32) -> Option < (u32 , u32 , u64) >
+  fn collect_app_details (sys : & System , total_mem : u64) -> (Vec < AppDetail > , Vec < String >)
+  ```
 
----
+### `src/monitor/timeline_tracker.rs` (Role: general, Lines: 297)
+- **Responsibility**: Core general logic in src/monitor/timeline_tracker.rs
+- **Imports**: use serde :: { Deserialize , Serialize } 
+- **Types & Enums**:
+  ```rust
+  pub struct PlaybackInterval
+  pub struct UniqueTimelineTracker
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new () -> Self
+  fn intervals (& self) -> & [PlaybackInterval]
+  fn merge_interval_lists (a : & [PlaybackInterval] , b : & [PlaybackInterval] ,) -> Vec < PlaybackInterval >
+  fn load_intervals (& mut self , intervals : & [PlaybackInterval])
+  fn set_threshold_triggered (& mut self , triggered : bool)
+  fn set_media (& mut self , media_key : & str , duration : Option < u64 >)
+  fn set_duration (& mut self , duration : u64)
+  fn record_position (& mut self , current_pos : u64 , is_paused : bool)
+  fn add_interval (& mut self , start : u64 , end : u64)
+  fn total_unique_secs (& self) -> u64
+  fn coverage_pct (& self) -> f32
+  fn check_threshold (& mut self , threshold_pct : f32) -> Option < (u64 , u64 , f32) >
+  ```
 
-## 🛠️ CLI Quick Reference
+### `src/monitor/window.rs` (Role: general, Lines: 242)
+- **Responsibility**: Core general logic in src/monitor/window.rs
+- **Imports**: use anyhow :: Result , use chrono :: Local , use serde :: Deserialize , use std :: env , use std :: os :: unix :: net :: UnixStream as StdUnixStream , use std :: path :: PathBuf , use std :: process :: Command , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use tokio :: io :: { AsyncBufReadExt , BufReader } , use tokio :: net :: UnixStream , use tokio :: time :: { sleep , Duration } , use crate :: logger :: { ActivityEvent , LogWriter } 
+- **Types & Enums**:
+  ```rust
+  pub struct WindowMonitor
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new (writer : LogWriter) -> Self
+  fn get_current_window () -> Option < (String , String) >
+  async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
+  fn find_hyprland_socket_and_sig () -> Option < (String , PathBuf) >
+  ```
 
+### `src/plugin.rs` (Role: general, Lines: 114)
+- **Responsibility**: Core general logic in src/plugin.rs
+- **Imports**: use anyhow :: { Context , Result } , use std :: fs , use std :: os :: unix :: fs :: PermissionsExt , use std :: path :: { Path , PathBuf } , use std :: process :: Stdio , use tokio :: io :: AsyncWriteExt , use tokio :: process :: Command , use tokio :: time :: { timeout , Duration } , use crate :: logger :: ActivityEvent 
+- **Types & Enums**:
+  ```rust
+  pub struct PluginDispatcher
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn get_plugins_dir () -> PathBuf
+  fn ensure_plugins_dir () -> Result < PathBuf >
+  fn list_plugins () -> Vec < PathBuf >
+  fn dispatch_event (event : & ActivityEvent)
+  ```
+
+### `src/service.rs` (Role: general, Lines: 54)
+- **Responsibility**: Core general logic in src/service.rs
+- **Imports**: use anyhow :: { Context , Result } , use std :: fs :: { create_dir_all , write } , use std :: process :: Command 
+- **Public Functions & Signatures**:
+  ```rust
+  fn install_user_service () -> Result < () >
+  ```
+
+### `src/tui/media_inspector.rs` (Role: tui, Lines: 383)
+- **Responsibility**: Core tui logic in src/tui/media_inspector.rs
+- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , Paragraph , Wrap } , Frame , } , use super :: media_tab :: MediaTabState , use crate :: mal :: SyncStatus 
+- **Public Functions & Signatures**:
+  ```rust
+  fn render_anime_inspector (f : & mut Frame , area : Rect , state : & MediaTabState)
+  fn render_force_sync_modal (f : & mut Frame , area : Rect , state : & MediaTabState)
+  ```
+
+### `src/tui/media_picker.rs` (Role: tui, Lines: 452)
+- **Responsibility**: Core tui logic in src/tui/media_picker.rs
+- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , List , ListItem , Paragraph } , Frame , } , use std :: path :: PathBuf , use std :: sync :: mpsc :: { self , Receiver , Sender , TryRecvError } , use std :: time :: { Duration , Instant } , use crate :: mal :: client :: MalAnimeNode , use crate :: mal :: overrides :: reassign_history , use crate :: mal :: { AnimeOverrides , MalAuth , MalClient } 
+- **Types & Enums**:
+  ```rust
+  pub struct MediaPickerState
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn new () -> Self
+  fn open (& mut self , folder : Option < PathBuf > , seed_query : & str)
+  fn close (& mut self)
+  fn push_char (& mut self , c : char)
+  fn pop_char (& mut self)
+  fn retry (& mut self)
+  fn needs_query (& self) -> bool
+  fn select_next (& mut self)
+  fn select_prev (& mut self)
+  fn tick (& mut self)
+  fn poll (& mut self)
+  fn apply (& mut self) -> Option < String >
+  fn render_media_picker (f : & mut Frame , area : Rect , state : & MediaPickerState)
+  ```
+
+### `src/tui/media_tab/tests.rs` (Role: tui, Lines: 230)
+- **Responsibility**: Core tui logic in src/tui/media_tab/tests.rs
+- **Imports**: use super :: * 
+
+### `src/tui/media_tab.rs` (Role: tui, Lines: 402)
+- **Responsibility**: Core tui logic in src/tui/media_tab.rs
+- **Imports**: use chrono :: { Datelike , Local , NaiveDate , NaiveDateTime } , use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , List , ListItem , ListState , Paragraph } , Frame , } , use std :: collections :: HashMap , use std :: time :: Instant , use super :: media_inspector :: { render_anime_inspector , render_force_sync_modal } , use crate :: mal :: { AnimeSyncHistory , AnimeSyncRecord , MalHandler , SyncStatus } 
+- **Types & Enums**:
+  ```rust
+  pub enum GroupMode
+  pub struct MediaTabState
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn next (self) -> Self
+  fn label (self) -> & 'static str
+  fn new () -> Self
+  fn refresh (& mut self)
+  fn cycle_group_mode (& mut self)
+  fn select_next (& mut self)
+  fn select_prev (& mut self)
+  fn selected_record (& self) -> Option < & AnimeSyncRecord >
+  fn set_status (& mut self , msg : String)
+  fn trigger_sync (& mut self , force : bool)
+  fn render_media_tab (f : & mut Frame , area : Rect , state : & mut MediaTabState)
+  ```
+
+### `src/tui.rs` (Role: tui, Lines: 1598)
+- **Responsibility**: Core tui logic in src/tui.rs
+- **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: System , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
+- **Public Functions & Signatures**:
+  ```rust
+  fn run_status_tui () -> Result < () >
+  ```
+
+## 4. Execution Lifecycle Trace
+1. **Startup**: Entrypoint parses CLI flags & dispatches command.
+2. **Execution**: Core domain logic processes inputs and evaluates rules.
+3. **Persistence / I/O**: Domain logic calls infra for disk/terminal I/O.
+4. **Exit**: Graceful termination with standard exit codes.
+
+## 5. Verification Commands
 ```bash
-# Daemon
-sys-chronicle daemon --interval 5          # Start daemon (default 5s interval)
-sys-chronicle install-service               # Setup and enable systemd user unit
-
-# TUI & Status
-sys-chronicle status                        # Launch Ratatui TUI dashboard
-sys-chronicle status --plain                # Print plain-text snapshot
-
-# Export & Summary
-sys-chronicle export                        # Export today's activity as AI prompt
-sys-chronicle export --date 2026-09-10      # Export specific date
-sys-chronicle export --days 7               # Export last 7 days
-sys-chronicle export | wl-copy              # Pipe directly to Wayland clipboard
-
-# MyAnimeList Scrobbler (sys-chronicle-mal)
-sys-chronicle-mal login                     # Interactive OAuth2 PKCE login
-sys-chronicle-mal status                    # Check MAL connection & token health
-sys-chronicle-mal test "[Group] Title - 01" # Test regex/Gemini title parsing
-sys-chronicle-mal sync "Anime Title"        # Manually sync an anime
-sys-chronicle-mal sync "Anime Title" --force# Force overwrite MAL progress
-sys-chronicle-mal config --toast 2          # Set notification duration to 2s
-sys-chronicle-mal map <path> --id 53410     # Bind folder to a MAL entry (override)
-sys-chronicle-mal map --list                # List folder overrides
-sys-chronicle-mal map <path> --remove       # Remove a folder override
-sys-chronicle-mal map --list --json         # Machine-readable overrides
-sys-chronicle-mal hook                      # Run in stdin event hook mode
+cargo build --release --target x86_64-unknown-linux-gnu
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
-
----
-
-## 🔄 Maintenance & Sync Protocol
-
-Whenever making code or structural changes to this repository:
-1. **New Modules / Structs**: Add entries to the *Source File Tree & Responsibilities* table.
-2. **Schema Modifications**: Update the *Log Schema: `ActivityEvent`* section with new fields or variants.
-3. **Socket or IPC Changes**: Document new commands or socket endpoints under *IPC Protocols & Socket Contracts*.
-4. **Keybindings**: Update the *Global & Contextual Keybindings* matrix if shortcuts change.
-5. **Zero Dead Code & Warning Suppression**: Adhere strictly to clean code standards (no `#[allow(dead_code)]`, no unwrap/expect in production code paths, `<400` lines/file soft limit).
