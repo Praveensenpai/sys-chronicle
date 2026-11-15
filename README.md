@@ -19,7 +19,7 @@
 
 ---
 
-`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard. It silently tracks active window focus, system power states, CPU/RAM utilization, CPU temperature, fan speed, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
+`sys-chronicle` is an ultra-lightweight (~10 MB RAM) Rust background daemon and feature-packed Ratatui TUI dashboard. It silently tracks active window focus, system power states, CPU/RAM/Disk utilization, CPU temperature, fan speed, and process metrics into daily JSON Lines logs, formatted into instant AI-digestible Markdown reports.
 
 > [!TIP]
 > **Zero CPU Polling Overhead · ~10 MB RAM · Instant AI Clipboard Export (`e`)**
@@ -32,7 +32,7 @@
 <div align="center">
 
 ### ⚡ Tab 1: Real-Time Live System Dashboard
-*Live CPU & RAM utilization gauges, hardware sensor telemetry (Package Temp & Fan RPM), active Wayland window focus, and interactive process inspector.*
+*Live CPU, RAM & Disk utilization gauges, hardware sensor telemetry (Package Temp & Fan RPM), active Wayland window focus, and interactive process inspector.*
 
 ![Live Dashboard](assets/tui_live_dashboard.png)
 
@@ -95,6 +95,7 @@ cp target/release/sys-chronicle-mal ~/.local/bin/
 | Feature | Description |
 | :--- | :--- |
 | 🪟 **Event-Driven Focus Logging** | Connects to Hyprland Wayland IPC (`.socket2.sock`) for true **0% CPU polling** window focus capture. |
+| 💽 **Storage Telemetry** | Tracks the volume backing `/` — used capacity, total size, fill percentage, filesystem type and SSD/HDD media class. |
 | 📊 **Interactive Ratatui TUI** | 3 full-featured views: Live Telemetry, Daily Screen Time Analytics, and Anime Chronicle Inspector. |
 | 🎬 **Anti-Cheat 80% Scrobbler** | Merges disjoint intervals to calculate true unique playback coverage—no scrubbing exploits. |
 | 🧠 **Gemini 3.5 Flash AI Classifier** | Distinguishes canonical anime episodes from live-action events, Blu-ray extras, and bonuses. |

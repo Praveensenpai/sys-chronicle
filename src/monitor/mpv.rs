@@ -236,10 +236,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_connect_candidate_cleans_stale_socket() {
-        let test_socket = std::env::temp_dir().join(format!(
-            "test_stale_socket_{}.sock",
-            std::process::id()
-        ));
+        let test_socket =
+            std::env::temp_dir().join(format!("test_stale_socket_{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&test_socket);
         let listener = std::os::unix::net::UnixListener::bind(&test_socket).expect("bind socket");
         drop(listener);

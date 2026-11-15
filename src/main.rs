@@ -12,7 +12,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use sysinfo::System;
+use sysinfo::{Disks, System};
 use tokio::signal;
 
 use exporter::generate_ai_report;
@@ -156,10 +156,21 @@ async fn main() -> Result<()> {
                 }
 
                 let mut sys = System::new_all();
-                let metrics = MetricsMonitor::sample_metrics(&mut sys);
+                let mut disks = Disks::new_with_refreshed_list();
+                let metrics = MetricsMonitor::sample_metrics(&mut sys, &mut disks);
                 println!(
                     "CPU Load: {:.1}% | RAM: {:.1}% ({} / {} MB)",
                     metrics.cpu_pct, metrics.ram_pct, metrics.ram_used_mb, metrics.ram_total_mb
+                );
+                println!(
+                    "Disk Usage: {:.1}% ({} / {} GB){}",
+                    metrics.disk_pct,
+                    metrics.disk_used_gb,
+                    metrics.disk_total_gb,
+                    match &metrics.disk_label {
+                        Some(volume) => format!(" | {volume}"),
+                        None => String::new(),
+                    }
                 );
                 println!("Top Applications: {}", metrics.top_apps.join(", "));
             } else {

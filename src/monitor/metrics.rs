@@ -4,9 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use sysinfo::{CpuRefreshKind, ProcessRefreshKind, System};
+use sysinfo::{CpuRefreshKind, Disks, ProcessRefreshKind, System};
 use tokio::time::{sleep, Duration};
 
+use super::disk::sample_primary_disk;
 use super::process::collect_app_details;
 pub use super::process::AppDetail;
 use crate::logger::{ActivityEvent, LogWriter};
@@ -20,6 +21,10 @@ pub struct MetricsSnapshot {
     pub ram_used_mb: u64,
     pub ram_total_mb: u64,
     pub ram_pct: f32,
+    pub disk_used_gb: u64,
+    pub disk_total_gb: u64,
+    pub disk_pct: f32,
+    pub disk_label: Option<String>,
     pub top_apps: Vec<String>,
     pub app_details: Vec<AppDetail>,
 }
@@ -37,7 +42,7 @@ impl MetricsMonitor {
         }
     }
 
-    pub fn sample_metrics(sys: &mut System) -> MetricsSnapshot {
+    pub fn sample_metrics(sys: &mut System, disks: &mut Disks) -> MetricsSnapshot {
         sys.refresh_cpu_specifics(CpuRefreshKind::everything());
         sys.refresh_memory();
         sys.refresh_processes_specifics(ProcessRefreshKind::everything());
@@ -52,6 +57,16 @@ impl MetricsMonitor {
             0.0
         };
 
+        let (disk_used_gb, disk_total_gb, disk_pct, disk_label) = match sample_primary_disk(disks) {
+            Some(snapshot) => (
+                snapshot.used_gb,
+                snapshot.total_gb,
+                snapshot.used_pct,
+                Some(snapshot.label()),
+            ),
+            None => (0, 0, 0.0, None),
+        };
+
         let (app_details, top_apps) = collect_app_details(sys, total_mem);
 
         MetricsSnapshot {
@@ -63,6 +78,10 @@ impl MetricsMonitor {
             ram_used_mb: used_mem,
             ram_total_mb: total_mem,
             ram_pct,
+            disk_used_gb,
+            disk_total_gb,
+            disk_pct,
+            disk_label,
             top_apps,
             app_details,
         }
@@ -162,11 +181,12 @@ impl MetricsMonitor {
 
     pub async fn run(&mut self, running: Arc<AtomicBool>) -> Result<()> {
         let mut sys = System::new_all();
+        let mut disks = Disks::new_with_refreshed_list();
         sys.refresh_cpu_specifics(CpuRefreshKind::everything());
         sleep(Duration::from_millis(500)).await;
 
         while running.load(Ordering::SeqCst) {
-            let metrics = Self::sample_metrics(&mut sys);
+            let metrics = Self::sample_metrics(&mut sys, &mut disks);
             let now = Local::now();
             let timestamp_str = now.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string();
 
@@ -176,6 +196,10 @@ impl MetricsMonitor {
                 ram_used_mb: metrics.ram_used_mb,
                 ram_total_mb: metrics.ram_total_mb,
                 ram_pct: metrics.ram_pct,
+                disk_used_gb: metrics.disk_used_gb,
+                disk_total_gb: metrics.disk_total_gb,
+                disk_pct: metrics.disk_pct,
+                disk_label: metrics.disk_label,
                 top_apps: metrics.top_apps,
             };
 

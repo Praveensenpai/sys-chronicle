@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use std::io::stdout;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use sysinfo::System;
+use sysinfo::{Disks, System};
 
 use crate::exporter::generate_ai_report;
 use crate::logger::{ActivityEvent, LogWriter};
@@ -371,6 +371,7 @@ pub fn run_status_tui() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut sys = System::new_all();
+    let mut disks = Disks::new_with_refreshed_list();
 
     let mut active_tab = ActiveTab::Live;
     let mut is_paused = false;
@@ -393,7 +394,7 @@ pub fn run_status_tui() -> Result<()> {
     // Cached frozen snapshot for paused state
     let mut cached_window = WindowMonitor::get_current_window();
     let mut cached_power = PowerMonitor::read_current_state();
-    let mut cached_metrics = MetricsMonitor::sample_metrics(&mut sys);
+    let mut cached_metrics = MetricsMonitor::sample_metrics(&mut sys, &mut disks);
     let mut cached_analytics = compute_daily_screen_time();
 
     loop {
@@ -405,7 +406,7 @@ pub fn run_status_tui() -> Result<()> {
         if !is_paused {
             cached_window = WindowMonitor::get_current_window();
             cached_power = PowerMonitor::read_current_state();
-            cached_metrics = MetricsMonitor::sample_metrics(&mut sys);
+            cached_metrics = MetricsMonitor::sample_metrics(&mut sys, &mut disks);
             cached_analytics = compute_daily_screen_time();
         }
 
@@ -474,7 +475,7 @@ pub fn run_status_tui() -> Result<()> {
                     [
                         Constraint::Length(3), // Header & Tabs
                         Constraint::Length(5), // Active Window, Power & Sensors
-                        Constraint::Length(6), // CPU & RAM Gauges
+                        Constraint::Length(9), // CPU, RAM & Disk Gauges
                         Constraint::Min(8),    // Interactive App List or Analytics Tab
                         Constraint::Length(1), // Footer controls
                     ]
@@ -676,10 +677,17 @@ pub fn run_status_tui() -> Result<()> {
                 .block(Block::default().title(" 🌡️ Sensors ").borders(Borders::ALL).border_style(Style::default().fg(Color::LightRed)));
             f.render_widget(sensors_widget, top_chunks[2]);
 
-            // Middle Row: Gauges for CPU and RAM
+            // Middle Row: Gauges for CPU, RAM and Disk
             let gauge_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
+                .constraints(
+                    [
+                        Constraint::Length(3),
+                        Constraint::Length(3),
+                        Constraint::Length(3),
+                    ]
+                    .as_ref(),
+                )
                 .split(chunks[2]);
 
             // CPU Gauge
@@ -698,6 +706,19 @@ pub fn run_status_tui() -> Result<()> {
                 .gauge_style(Style::default().fg(if metrics.ram_pct > 85.0 { Color::Red } else { Color::Green }))
                 .ratio(ram_ratio as f64);
             f.render_widget(ram_gauge, gauge_chunks[1]);
+
+            // Disk Gauge
+            let disk_ratio = (metrics.disk_pct / 100.0).clamp(0.0, 1.0);
+            let disk_label = format!("{:.1}% ({} / {} GB)", metrics.disk_pct, metrics.disk_used_gb, metrics.disk_total_gb);
+            let disk_title = match &metrics.disk_label {
+                Some(volume) => format!(" 💾 Disk Usage: {} | {} ", disk_label, volume),
+                None => format!(" 💾 Disk Usage: {} ", disk_label),
+            };
+            let disk_gauge = Gauge::default()
+                .block(Block::default().title(disk_title).borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
+                .gauge_style(Style::default().fg(if metrics.disk_pct > 85.0 { Color::Red } else { Color::Cyan }))
+                .ratio(disk_ratio as f64);
+            f.render_widget(disk_gauge, gauge_chunks[2]);
 
             // Main Content Area based on Active Tab
             match active_tab {

@@ -2,6 +2,11 @@ use std::collections::BTreeMap;
 
 use crate::logger::ActivityEvent;
 
+use super::format::{
+    clean_window_title, display_app_name, extract_short_time, format_duration, top_app_name,
+};
+use super::metrics;
+
 pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String {
     if events.is_empty() {
         return format!(
@@ -261,71 +266,8 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
     }
     report.push('\n');
 
-    // 5. System Load Metrics (CPU & Memory Spikes)
-    report.push_str("## 5. CPU & RAM Resource Utilization\n");
-
-    let mut cpu_samples = Vec::new();
-    let mut ram_samples = Vec::new();
-    let mut high_load_spikes = Vec::new();
-
-    for event in events {
-        if let ActivityEvent::SystemMetrics {
-            timestamp,
-            cpu_pct,
-            ram_used_mb,
-            ram_total_mb,
-            ram_pct,
-            top_apps,
-        } = event
-        {
-            cpu_samples.push(*cpu_pct);
-            ram_samples.push((*ram_used_mb, *ram_total_mb, *ram_pct));
-
-            if *cpu_pct >= 70.0 || *ram_pct >= 85.0 {
-                let time_str = extract_short_time(timestamp);
-                high_load_spikes.push(format!(
-                    "- `[{}]` CPU: **{:.1}%** | RAM: **{:.1}%** ({} / {} MB) | Top Apps: {}",
-                    time_str,
-                    cpu_pct,
-                    ram_pct,
-                    ram_used_mb,
-                    ram_total_mb,
-                    top_apps.join(", ")
-                ));
-            }
-        }
-    }
-
-    if !cpu_samples.is_empty() {
-        let avg_cpu: f32 = cpu_samples.iter().sum::<f32>() / cpu_samples.len() as f32;
-        let max_cpu: f32 = cpu_samples.iter().cloned().fold(0.0, f32::max);
-
-        let avg_ram: f32 =
-            ram_samples.iter().map(|(_, _, p)| p).sum::<f32>() / ram_samples.len() as f32;
-        let max_ram: f32 = ram_samples.iter().map(|(_, _, p)| *p).fold(0.0, f32::max);
-        let max_ram_mb = ram_samples.iter().map(|(u, _, _)| *u).max().unwrap_or(0);
-        let total_ram_mb = ram_samples.first().map(|(_, t, _)| *t).unwrap_or(0);
-
-        report.push_str(&format!(
-            "- **CPU Load**: Avg `{:.1}%` | Peak `{:.1}%`\n",
-            avg_cpu, max_cpu
-        ));
-        report.push_str(&format!(
-            "- **RAM Load**: Avg `{:.1}%` | Peak `{:.1}%` ({} / {} MB)\n\n",
-            avg_ram, max_ram, max_ram_mb, total_ram_mb
-        ));
-
-        if !high_load_spikes.is_empty() {
-            report.push_str("### Resource Spikes (>70% CPU or >85% RAM)\n");
-            for spike in high_load_spikes.iter().take(20) {
-                report.push_str(spike);
-                report.push('\n');
-            }
-            report.push('\n');
-        }
-    } else {
-        report.push_str("No system performance samples recorded.\n\n");
-    }
+    // 5. System Load Metrics (CPU, Memory & Storage Spikes)
+    report.push_str(&metrics::resource_section(events));
 
     // 6. Media Playback & Player Events
     let mut media_events = Vec::new();
@@ -384,72 +326,8 @@ pub fn generate_ai_report(events: &[ActivityEvent], title_date: &str) -> String 
     report
 }
 
-fn extract_short_time(ts: &str) -> String {
-    // Input format: 2026-08-10T00:21:24.123+05:30 -> 00:21:24
-    if let Some(time_part) = ts.split('T').nth(1) {
-        let clean = time_part.split('+').next().unwrap_or(time_part);
-        clean.split('.').next().unwrap_or(clean).to_string()
-    } else {
-        ts.to_string()
-    }
-}
-
-fn format_duration(secs: u64) -> String {
-    let hours = secs / 3600;
-    let mins = (secs % 3600) / 60;
-    let s = secs % 60;
-
-    if hours > 0 {
-        format!("{}h {}m", hours, mins)
-    } else if mins > 0 {
-        format!("{}m {}s", mins, s)
-    } else {
-        format!("{}s", s)
-    }
-}
-
 struct AppObservation {
     first_timestamp: String,
     last_timestamp: String,
     samples: u64,
-}
-
-fn top_app_name(top_app: &str) -> String {
-    top_app
-        .split_once(" (")
-        .map(|(name, _)| name)
-        .unwrap_or(top_app)
-        .trim()
-        .to_string()
-}
-
-fn display_app_name(app: &str) -> String {
-    match app {
-        "jetbrains-studio" | "studio" => format!("Android Studio ({})", app),
-        _ => app.to_string(),
-    }
-}
-
-fn clean_window_title(title: &str, _app_class: &str) -> String {
-    let t = title.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-
-    let suffixes = [
-        " - mpv",
-        " - Google Chrome",
-        " - Visual Studio Code",
-        " — Mozilla Firefox",
-        " - Alacritty",
-    ];
-
-    let mut cleaned = t;
-    for suffix in suffixes {
-        if cleaned.ends_with(suffix) {
-            cleaned = &cleaned[..cleaned.len() - suffix.len()];
-        }
-    }
-
-    cleaned.trim().to_string()
 }

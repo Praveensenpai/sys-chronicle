@@ -19,22 +19,41 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 - **Responsibility**: Core general logic in src/bin/mal.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: { DateTime , Local , TimeZone } , use clap :: { Parser , Subcommand } , use std :: env , use std :: io :: { self , IsTerminal , Write } , use sys_chronicle :: mal :: { AnimeParser , GeminiParser , MalAuth , MalClient , MalHandler } 
 
-### `src/exporter/ai.rs` (Role: general, Lines: 455)
+### `src/exporter/ai.rs` (Role: general, Lines: 333)
 - **Responsibility**: Core general logic in src/exporter/ai.rs
-- **Imports**: use std :: collections :: BTreeMap , use crate :: logger :: ActivityEvent 
+- **Imports**: use std :: collections :: BTreeMap , use crate :: logger :: ActivityEvent , use super :: format :: { clean_window_title , display_app_name , extract_short_time , format_duration , top_app_name , } , use super :: metrics 
 - **Public Functions & Signatures**:
   ```rust
   fn generate_ai_report (events : & [ActivityEvent] , title_date : & str) -> String
   ```
 
-### `src/exporter/mod.rs` (Role: general, Lines: 3)
+### `src/exporter/format.rs` (Role: general, Lines: 71)
+- **Responsibility**: Core general logic in src/exporter/format.rs
+- **Public Functions & Signatures**:
+  ```rust
+  fn extract_short_time (ts : & str) -> String
+  fn format_duration (secs : u64) -> String
+  fn top_app_name (top_app : & str) -> String
+  fn display_app_name (app : & str) -> String
+  fn clean_window_title (title : & str , _app_class : & str) -> String
+  ```
+
+### `src/exporter/metrics.rs` (Role: general, Lines: 228)
+- **Responsibility**: Core general logic in src/exporter/metrics.rs
+- **Imports**: use crate :: logger :: ActivityEvent , use super :: format :: extract_short_time 
+- **Public Functions & Signatures**:
+  ```rust
+  fn resource_section (events : & [ActivityEvent]) -> String
+  ```
+
+### `src/exporter/mod.rs` (Role: general, Lines: 5)
 - **Responsibility**: Core general logic in src/exporter/mod.rs
 - **Imports**: pub use ai :: generate_ai_report 
 
 ### `src/lib.rs` (Role: general, Lines: 7)
 - **Responsibility**: Core general logic in src/lib.rs
 
-### `src/logger/event.rs` (Role: general, Lines: 64)
+### `src/logger/event.rs` (Role: general, Lines: 137)
 - **Responsibility**: Core general logic in src/logger/event.rs
 - **Imports**: use serde :: { Deserialize , Serialize } 
 - **Types & Enums**:
@@ -67,9 +86,9 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn read_events_for_date_range (start_date : & str , end_date : & str ,) -> Result < Vec < ActivityEvent > >
   ```
 
-### `src/main.rs` (Role: general, Lines: 221)
+### `src/main.rs` (Role: general, Lines: 232)
 - **Responsibility**: Core general logic in src/main.rs
-- **Imports**: use anyhow :: Result , use chrono :: Local , use clap :: { ArgAction , Parser , Subcommand } , use std :: io :: IsTerminal , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: System , use tokio :: signal , use exporter :: generate_ai_report , use logger :: LogWriter , use monitor :: { MetricsMonitor , MpvMonitor , PowerMonitor , WindowMonitor } 
+- **Imports**: use anyhow :: Result , use chrono :: Local , use clap :: { ArgAction , Parser , Subcommand } , use std :: io :: IsTerminal , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: { Disks , System } , use tokio :: signal , use exporter :: generate_ai_report , use logger :: LogWriter , use monitor :: { MetricsMonitor , MpvMonitor , PowerMonitor , WindowMonitor } 
 
 ### `src/mal/auth.rs` (Role: general, Lines: 312)
 - **Responsibility**: Core general logic in src/mal/auth.rs
@@ -262,9 +281,22 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 - **Responsibility**: Core general logic in src/mal.rs
 - **Imports**: pub use auth :: MalAuth , pub use candidate :: select_best_candidate , pub use classifier :: { AnimeClassifier , MediaClassification } , pub use client :: MalClient , pub use gemini :: GeminiParser , pub use handler :: MalHandler , pub use history :: { AnimeSyncHistory , AnimeSyncRecord , SyncStatus } , pub use overrides :: { AnimeOverride , AnimeOverrides } , pub use parser :: { AnimeInfo , AnimeParser } , pub use resolver :: { resolve_anime , ResolvedAnime } 
 
-### `src/monitor/metrics.rs` (Role: general, Lines: 189)
+### `src/monitor/disk.rs` (Role: general, Lines: 182)
+- **Responsibility**: Core general logic in src/monitor/disk.rs
+- **Imports**: use std :: ffi :: OsStr , use sysinfo :: { Disk , Disks } 
+- **Types & Enums**:
+  ```rust
+  pub struct DiskSnapshot
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn label (& self) -> String
+  fn sample_primary_disk (disks : & mut Disks) -> Option < DiskSnapshot >
+  ```
+
+### `src/monitor/metrics.rs` (Role: general, Lines: 213)
 - **Responsibility**: Core general logic in src/monitor/metrics.rs
-- **Imports**: use anyhow :: Result , use chrono :: Local , use std :: fs , use std :: path :: Path , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: { CpuRefreshKind , ProcessRefreshKind , System } , use tokio :: time :: { sleep , Duration } , use super :: process :: collect_app_details , pub use super :: process :: AppDetail , use crate :: logger :: { ActivityEvent , LogWriter } 
+- **Imports**: use anyhow :: Result , use chrono :: Local , use std :: fs , use std :: path :: Path , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: { CpuRefreshKind , Disks , ProcessRefreshKind , System } , use tokio :: time :: { sleep , Duration } , use super :: disk :: sample_primary_disk , use super :: process :: collect_app_details , pub use super :: process :: AppDetail , use crate :: logger :: { ActivityEvent , LogWriter } 
 - **Types & Enums**:
   ```rust
   pub struct MetricsSnapshot
@@ -273,15 +305,15 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 - **Public Functions & Signatures**:
   ```rust
   fn new (writer : LogWriter , interval_secs : u64) -> Self
-  fn sample_metrics (sys : & mut System) -> MetricsSnapshot
+  fn sample_metrics (sys : & mut System , disks : & mut Disks) -> MetricsSnapshot
   async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
   ```
 
-### `src/monitor/mod.rs` (Role: general, Lines: 13)
+### `src/monitor/mod.rs` (Role: general, Lines: 14)
 - **Responsibility**: Core general logic in src/monitor/mod.rs
 - **Imports**: pub use metrics :: MetricsMonitor , pub use mpv :: MpvMonitor , pub use power :: PowerMonitor , pub use timeline_tracker :: PlaybackInterval , pub use window :: WindowMonitor 
 
-### `src/monitor/mpv.rs` (Role: general, Lines: 252)
+### `src/monitor/mpv.rs` (Role: general, Lines: 250)
 - **Responsibility**: Core general logic in src/monitor/mpv.rs
 - **Imports**: use anyhow :: Result , use chrono :: Local , use serde :: Deserialize , use std :: env , use std :: path :: { Path , PathBuf } , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use tokio :: io :: { AsyncBufReadExt , AsyncWriteExt , BufReader } , use tokio :: net :: UnixStream , use tokio :: time :: { sleep , Duration } , use crate :: logger :: { ActivityEvent , LogWriter } , use super :: mpv_session :: MpvPlaybackSession 
 - **Types & Enums**:
@@ -469,9 +501,9 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_tab (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
-### `src/tui.rs` (Role: tui, Lines: 1598)
+### `src/tui.rs` (Role: tui, Lines: 1619)
 - **Responsibility**: Core tui logic in src/tui.rs
-- **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: System , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
+- **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: { Disks , System } , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
 - **Public Functions & Signatures**:
   ```rust
   fn run_status_tui () -> Result < () >
@@ -489,3 +521,7 @@ cargo build --release --target x86_64-unknown-linux-gnu
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
+
+## 6. Recent Iteration Changes
+- **2026-11-15**: Added storage telemetry. New `src/monitor/disk.rs` samples the volume backing `/` via `sysinfo::Disks` (used/total GB, fill %, filesystem, SSD/HDD class). `MetricsSnapshot` and `ActivityEvent::SystemMetrics` gained `disk_used_gb`/`disk_total_gb`/`disk_pct`/`disk_label` (serde defaults keep pre-existing logs readable). TUI renders a third `💾 Disk Usage` gauge; `status --plain` and the AI report expose the same figures. Split `src/exporter/ai.rs` into `format.rs` (pure helpers) and `metrics.rs` (resource section) to keep every file under the 400-line limit.
+

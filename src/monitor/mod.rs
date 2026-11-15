@@ -1,3 +1,4 @@
+pub mod disk;
 pub mod metrics;
 pub mod mpv;
 pub mod mpv_session;
