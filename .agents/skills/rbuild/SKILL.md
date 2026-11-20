@@ -1,6 +1,6 @@
 ---
 name: rbuild
-description: Offloads Rust crate and workspace compilation to remote GitHub Codespaces runners with zero local CPU overhead, persistent SSD caching, and automatic binary retrieval.
+description: Offloads Rust crate and workspace compilation and verification (check/clippy/test) to remote GitHub Codespaces runners with zero local CPU overhead, persistent SSD caching, and automatic binary retrieval.
 ---
 
 # ⚡ rbuild — Remote Rust Compiler
@@ -15,6 +15,7 @@ Use `rbuild` whenever you need to compile a Rust project, crate, or binary witho
 - **Resource Conservation**: Compiling code without maxing local CPU cores or causing fan noise and thermal throttling.
 - **Incremental Fast Builds**: Making iterative changes to code while taking advantage of persistent remote `target/` directories and `sccache` hits.
 - **Autonomous Agent Workflows**: Any AI agent tasked with building or verifying a Rust project can run `rbuild` directly.
+- **Remote Verification**: Run `cargo check`, `cargo clippy`, or `cargo test` on the remote runner with `rbuild --check`, `--clippy`, or `--test` (no binary download).
 
 ### ⚖️ Local vs Remote Decision Rule (Quota Awareness)
 - **Do It Local If**:
@@ -95,6 +96,18 @@ rbuild ssh
 
 # Purge all remote project targets to reclaim SSD space
 rbuild clean
+```
+
+### 10. Remote Verification (no binary download)
+```bash
+# Run `cargo check --all-targets` on the remote runner
+rbuild --check
+
+# Run `cargo clippy --all-targets -- -D warnings` on the remote runner
+rbuild --clippy
+
+# Run `cargo test --all-targets` on the remote runner
+rbuild --test
 ```
 
 ---
