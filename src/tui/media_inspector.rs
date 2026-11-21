@@ -268,7 +268,7 @@ fn render_inspector_top(
     if show_cover {
         let top_split = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(24), Constraint::Min(20)])
+            .constraints([Constraint::Length(26), Constraint::Min(20)])
             .split(area);
 
         let cover_block = Block::default()

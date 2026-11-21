@@ -15,7 +15,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 
 ## 3. Module & Interface Skeleton
 
-### `src/bin/mal.rs` (Role: general, Lines: 392)
+### `src/bin/mal.rs` (Role: general, Lines: 381)
 - **Responsibility**: Core general logic in src/bin/mal.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: { DateTime , Local , TimeZone } , use clap :: { Parser , Subcommand } , use std :: env , use std :: io :: { self , IsTerminal , Write } , use sys_chronicle :: mal :: { AnimeParser , GeminiParser , MalAuth , MalClient , MalHandler } 
 
@@ -86,11 +86,11 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn read_events_for_date_range (start_date : & str , end_date : & str ,) -> Result < Vec < ActivityEvent > >
   ```
 
-### `src/main.rs` (Role: general, Lines: 232)
+### `src/main.rs` (Role: general, Lines: 258)
 - **Responsibility**: Core general logic in src/main.rs
 - **Imports**: use anyhow :: Result , use chrono :: Local , use clap :: { ArgAction , Parser , Subcommand } , use std :: io :: IsTerminal , use std :: sync :: atomic :: { AtomicBool , Ordering } , use std :: sync :: Arc , use sysinfo :: { Disks , System } , use tokio :: signal , use exporter :: generate_ai_report , use logger :: LogWriter , use monitor :: { MetricsMonitor , MpvMonitor , PowerMonitor , WindowMonitor } 
 
-### `src/mal/auth.rs` (Role: general, Lines: 312)
+### `src/mal/auth.rs` (Role: general, Lines: 258)
 - **Responsibility**: Core general logic in src/mal/auth.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: { Duration as ChronoDuration , Local } , use rand :: { distributions :: Alphanumeric , Rng } , use reqwest :: Client , use serde :: { Deserialize , Serialize } , use std :: fs , use std :: path :: PathBuf , use std :: process :: Command , use tokio :: io :: { AsyncReadExt , AsyncWriteExt } , use tokio :: net :: TcpListener , use url :: Url 
 - **Types & Enums**:
@@ -100,10 +100,6 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   ```
 - **Public Functions & Signatures**:
   ```rust
-  fn is_deepseek_enabled (& self) -> bool
-  fn get_deepseek_url (& self) -> String
-  fn get_deepseek_model (& self) -> String
-  fn get_deepseek_key (& self) -> String
   fn get_gemini_model (& self) -> String
   fn config_path () -> PathBuf
   fn load_config () -> Result < MalConfig >
@@ -175,7 +171,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn update_episode_progress (& self , anime_id : u64 , episode : u32 , total_episodes : u32 ,) -> Result < UserListStatus >
   ```
 
-### `src/mal/gemini.rs` (Role: general, Lines: 435)
+### `src/mal/gemini.rs` (Role: general, Lines: 304)
 - **Responsibility**: Core general logic in src/mal/gemini.rs
 - **Imports**: use anyhow :: { Context , Result } , use reqwest :: Client , use serde :: { Deserialize , Serialize } , use std :: time :: Duration , use super :: parser :: AnimeInfo 
 - **Types & Enums**:
@@ -443,9 +439,9 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn install_user_service () -> Result < () >
   ```
 
-### `src/tui/media_cover.rs` (Role: tui, Lines: 319)
+### `src/tui/media_cover.rs` (Role: tui, Lines: 350)
 - **Responsibility**: Core tui logic in src/tui/media_cover.rs
-- **Imports**: use ratatui :: { layout :: { Alignment , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Paragraph } , Frame , } , use sha2 :: { Digest , Sha256 } , use std :: collections :: { HashMap , HashSet } , use std :: path :: { Path , PathBuf } , use std :: sync :: { Arc , Mutex } , use crate :: mal :: history :: AnimeSyncRecord 
+- **Imports**: use ratatui :: { layout :: { Alignment , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Paragraph } , Frame , } , use sha2 :: { Digest , Sha256 } , use std :: collections :: { HashMap , HashSet } , use std :: path :: { Path , PathBuf } , use std :: sync :: { Arc , Mutex } , use super :: media_kitty :: { clear_kitty_graphics , is_kitty_terminal , transmit_kitty_image } , use crate :: mal :: history :: AnimeSyncRecord 
 - **Types & Enums**:
   ```rust
   pub struct CoverCache
@@ -462,6 +458,17 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
 - **Public Functions & Signatures**:
   ```rust
   fn render_anime_inspector (f : & mut Frame , area : Rect , state : & mut MediaTabState)
+  ```
+
+### `src/tui/media_kitty.rs` (Role: tui, Lines: 106)
+- **Responsibility**: Core tui logic in src/tui/media_kitty.rs
+- **Imports**: use base64 :: Engine , use ratatui :: layout :: Rect , use std :: io :: Write , use std :: path :: Path 
+- **Public Functions & Signatures**:
+  ```rust
+  fn is_kitty_terminal () -> bool
+  fn emit_raw_escape (seq : & str , in_tmux : bool)
+  fn clear_kitty_graphics ()
+  fn transmit_kitty_image (path : & Path , area : Rect) -> Result < () , Box < dyn std :: error :: Error + Send + Sync > >
   ```
 
 ### `src/tui/media_modal.rs` (Role: tui, Lines: 90)
@@ -523,12 +530,29 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_tab (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
-### `src/tui.rs` (Role: tui, Lines: 1621)
+### `src/tui.rs` (Role: tui, Lines: 1628)
 - **Responsibility**: Core tui logic in src/tui.rs
 - **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: { Disks , System } , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
 - **Public Functions & Signatures**:
   ```rust
   fn run_status_tui () -> Result < () >
+  ```
+
+### `src/updater.rs` (Role: general, Lines: 264)
+- **Responsibility**: Core general logic in src/updater.rs
+- **Imports**: use anyhow :: { bail , Context , Result } , use serde :: Deserialize , use std :: fs , use std :: path :: { Path , PathBuf } , use std :: process :: Command 
+- **Types & Enums**:
+  ```rust
+  pub struct SemVer
+  pub struct ReleaseAsset
+  pub struct ReleaseResponse
+  ```
+- **Public Functions & Signatures**:
+  ```rust
+  fn parse (s : & str) -> Option < Self >
+  fn is_newer_than (& self , other : & Self) -> bool
+  async fn fetch_latest_release (repo : & str) -> Result < ReleaseResponse >
+  async fn run_update (check_only : bool , force : bool) -> Result < () >
   ```
 
 ## 4. Execution Lifecycle Trace

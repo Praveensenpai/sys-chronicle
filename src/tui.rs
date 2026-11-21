@@ -25,6 +25,7 @@ use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
 pub mod media_cover;
+pub mod media_kitty;
 mod media_inspector;
 mod media_modal;
 mod media_picker;
@@ -1451,6 +1452,7 @@ pub fn run_status_tui() -> Result<()> {
                     match key.code {
                         KeyCode::Char('q') => break,
                         KeyCode::Tab => {
+                            media_kitty::clear_kitty_graphics();
                             active_tab = ActiveTab::Live;
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
@@ -1489,6 +1491,7 @@ pub fn run_status_tui() -> Result<()> {
                             media_tab_state.cycle_group_mode();
                         }
                         KeyCode::Esc => {
+                            media_kitty::clear_kitty_graphics();
                             active_tab = ActiveTab::Live;
                         }
                         _ => {}
@@ -1507,7 +1510,10 @@ pub fn run_status_tui() -> Result<()> {
                                 media_tab_state.refresh();
                                 ActiveTab::MediaSync
                             }
-                            ActiveTab::MediaSync => ActiveTab::Live,
+                            ActiveTab::MediaSync => {
+                                media_kitty::clear_kitty_graphics();
+                                ActiveTab::Live
+                            }
                         };
                     }
                     KeyCode::Char('/') => {
@@ -1563,6 +1569,7 @@ pub fn run_status_tui() -> Result<()> {
         }
     }
 
+    media_kitty::clear_kitty_graphics();
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;

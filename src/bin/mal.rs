@@ -171,17 +171,6 @@ async fn run_status() -> Result<()> {
     println!("Config file: {:?}", MalAuth::config_path());
     println!("Client ID: {}", config.client_id);
 
-    let ds_status = if config.is_deepseek_enabled() {
-        format!(
-            "Enabled ({}, {})",
-            config.get_deepseek_model(),
-            config.get_deepseek_url()
-        )
-    } else {
-        "Disabled".to_string()
-    };
-    println!("DeepSeek AI (Primary): {}", ds_status);
-
     let gemini_status = if let Some(ref k) = config.gemini_api_key {
         format!(
             "Configured (ending in ...{}, model: {})",
@@ -194,9 +183,9 @@ async fn run_status() -> Result<()> {
             config.get_gemini_model()
         )
     } else {
-        "Not configured (optional secondary fallback)".to_string()
+        "Not configured (heuristic regex parser active)".to_string()
     };
-    println!("Gemini AI (Secondary): {}", gemini_status);
+    println!("Gemini AI: {}", gemini_status);
 
     let exp_dt: DateTime<Local> = Local
         .timestamp_opt(config.expires_at, 0)
@@ -224,7 +213,7 @@ async fn run_test(name: &str) -> Result<()> {
 
     let config = MalAuth::load_config().ok().unwrap_or_default();
     if let Ok(parser) = GeminiParser::from_config(&config) {
-        println!("[+] Querying AI parser (DeepSeek primary with Gemini fallback)...");
+        println!("[+] Querying AI parser (Gemini)...");
         match parser.parse(name).await {
             Ok(Some(info)) => {
                 println!("✔ AI Result: \"{}\" Episode {}", info.title, info.episode);

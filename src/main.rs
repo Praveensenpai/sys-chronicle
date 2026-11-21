@@ -5,6 +5,7 @@ mod monitor;
 pub mod plugin;
 mod service;
 mod tui;
+mod updater;
 
 use anyhow::Result;
 use chrono::Local;
@@ -69,6 +70,15 @@ enum Commands {
     },
     /// Generate and enable systemd --user service
     InstallService,
+    /// Check for updates from GitHub releases and update sys-chronicle
+    Update {
+        /// Only check for updates without installing
+        #[arg(short, long)]
+        check: bool,
+        /// Force re-installation even if the local version is up to date
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 #[tokio::main]
@@ -206,6 +216,9 @@ async fn main() -> Result<()> {
         Commands::InstallService => {
             service::install_user_service()?;
         }
+        Commands::Update { check, force } => {
+            updater::run_update(check, force).await?;
+        }
     }
 
     Ok(())
@@ -227,6 +240,19 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Status { plain: false })
+        ));
+    }
+
+    #[test]
+    fn test_cli_update_subcommand_flags() {
+        let cli = Cli::try_parse_from(["sys-chronicle", "update", "--check", "--force"])
+            .expect("parse update");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Update {
+                check: true,
+                force: true
+            })
         ));
     }
 }

@@ -10,12 +10,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::media_kitty::{clear_kitty_graphics, is_kitty_terminal, transmit_kitty_image};
 use crate::mal::history::AnimeSyncRecord;
 
-/// In-memory cache for rendered half-block lines to avoid re-decoding every frame.
+/// In-memory cache for rendered cover graphics (Kitty protocol or Unicode half-blocks).
 pub struct CoverCache {
     rendered: HashMap<(String, u16, u16), Vec<Line<'static>>>,
     in_flight: Arc<Mutex<HashSet<String>>>,
+    last_rendered_key: Option<String>,
 }
 
 impl CoverCache {
@@ -23,6 +25,7 @@ impl CoverCache {
         Self {
             rendered: HashMap::new(),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
+            last_rendered_key: None,
         }
     }
 
@@ -46,24 +49,52 @@ impl CoverCache {
             None
         };
 
-        if let Some(path) = active_path {
-            let key = (path.to_string_lossy().to_string(), area.width, area.height);
-            if !self.rendered.contains_key(&key) {
-                if let Some(lines) = decode_halfblocks(&path, area.width, area.height) {
-                    self.rendered.insert(key.clone(), lines);
-                }
+        if is_kitty_terminal() {
+            if let Some(ref path) = active_path {
+                self.render_kitty_cover(f, area, path);
+                return;
             }
-
-            if let Some(lines) = self.rendered.get(&key) {
-                let p = Paragraph::new(lines.clone()).alignment(Alignment::Center);
-                f.render_widget(p, area);
+            clear_kitty_graphics();
+            self.last_rendered_key = None;
+        } else if let Some(ref path) = active_path {
+            if self.render_halfblock_cover(f, area, path) {
                 return;
             }
         }
 
-        // Trigger background download if image is missing and URL is known or can be resolved
         let is_fetching = trigger_background_fetch(record, disk_path, &self.in_flight);
         render_placeholder(f, area, is_fetching);
+    }
+
+    fn render_kitty_cover(&mut self, f: &mut Frame, area: Rect, path: &Path) {
+        let key = format!("{}:{}:{}", path.display(), area.width, area.height);
+        if self.last_rendered_key.as_deref() != Some(&key) {
+            clear_kitty_graphics();
+            if transmit_kitty_image(path, area).is_ok() {
+                self.last_rendered_key = Some(key);
+            }
+        }
+
+        let blank_str = " ".repeat(area.width as usize);
+        let blank_lines = vec![Line::from(blank_str); area.height as usize];
+        f.render_widget(Paragraph::new(blank_lines), area);
+    }
+
+    fn render_halfblock_cover(&mut self, f: &mut Frame, area: Rect, path: &Path) -> bool {
+        let key = (path.to_string_lossy().to_string(), area.width, area.height);
+        if !self.rendered.contains_key(&key) {
+            if let Some(lines) = decode_halfblocks(path, area.width, area.height) {
+                self.rendered.insert(key.clone(), lines);
+            }
+        }
+
+        if let Some(lines) = self.rendered.get(&key) {
+            let p = Paragraph::new(lines.clone()).alignment(Alignment::Center);
+            f.render_widget(p, area);
+            true
+        } else {
+            false
+        }
     }
 }
 
