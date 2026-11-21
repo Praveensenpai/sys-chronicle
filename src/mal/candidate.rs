@@ -355,6 +355,7 @@ mod tests {
         MalAnimeNode {
             id,
             title: title.to_string(),
+            main_picture: None,
             num_episodes: 12,
             media_type: Some(media_type.to_string()),
             alternative_titles: None,

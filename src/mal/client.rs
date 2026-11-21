@@ -4,10 +4,26 @@ use serde::{Deserialize, Serialize};
 
 const MAL_API_BASE: &str = "https://api.myanimelist.net/v2";
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub struct MainPicture {
+    #[serde(default)]
+    pub medium: Option<String>,
+    #[serde(default)]
+    pub large: Option<String>,
+}
+
+impl MainPicture {
+    pub fn best_url(&self) -> Option<&str> {
+        self.large.as_deref().or(self.medium.as_deref())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MalAnimeNode {
     pub id: u64,
     pub title: String,
+    #[serde(default)]
+    pub main_picture: Option<MainPicture>,
     #[serde(default)]
     pub num_episodes: u32,
     #[serde(default)]
@@ -135,7 +151,7 @@ impl MalClient {
                 ("limit", limit_str.as_str()),
                 (
                     "fields",
-                    "id,title,num_episodes,media_type,alternative_titles,my_list_status",
+                    "id,title,main_picture,num_episodes,media_type,alternative_titles,my_list_status",
                 ),
             ])
             .send()
@@ -161,7 +177,7 @@ impl MalClient {
             .get(&url)
             .query(&[(
                 "fields",
-                "id,title,num_episodes,media_type,alternative_titles,my_list_status",
+                "id,title,main_picture,num_episodes,media_type,alternative_titles,my_list_status",
             )])
             .send()
             .await?;

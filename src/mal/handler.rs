@@ -145,6 +145,10 @@ impl MalHandler {
                     mal_anime_id: None,
                     mal_current_ep: None,
                     mal_total_episodes: None,
+                    mal_title: None,
+                    mal_title_en: None,
+                    mal_title_ja: None,
+                    mal_image_url: None,
                     status: SyncStatus::NonSyncable {
                         reason: content_type,
                     },
@@ -221,10 +225,10 @@ impl MalHandler {
             watch_pct
         };
 
-        let (canonical_title, mal_anime_id, mal_current_ep, mal_total_episodes, final_status) =
+        let (canonical_title, mal_anime_id, mal_current_ep, mal_total_episodes, mal_title, mal_title_en, mal_title_ja, mal_image_url, final_status) =
             if let Some((anime, current_watched, status)) = mal_outcome {
                 (
-                    anime.title,
+                    anime.title.clone(),
                     Some(anime.id),
                     Some(if force {
                         info.episode
@@ -236,6 +240,10 @@ impl MalHandler {
                     } else {
                         None
                     },
+                    Some(anime.title),
+                    anime.alternative_titles.as_ref().and_then(|a| a.english.clone()),
+                    anime.alternative_titles.as_ref().and_then(|a| a.japanese.clone()),
+                    anime.main_picture.as_ref().and_then(|p| p.best_url().map(String::from)),
                     status,
                 )
             } else {
@@ -252,6 +260,10 @@ impl MalHandler {
                     existing.as_ref().and_then(|e| e.mal_anime_id),
                     existing.as_ref().and_then(|e| e.mal_current_ep),
                     existing.as_ref().and_then(|e| e.mal_total_episodes),
+                    existing.as_ref().and_then(|e| e.mal_title.clone()),
+                    existing.as_ref().and_then(|e| e.mal_title_en.clone()),
+                    existing.as_ref().and_then(|e| e.mal_title_ja.clone()),
+                    existing.as_ref().and_then(|e| e.mal_image_url.clone()),
                     fallback_status,
                 )
             };
@@ -268,6 +280,10 @@ impl MalHandler {
             mal_anime_id,
             mal_current_ep,
             mal_total_episodes,
+            mal_title,
+            mal_title_en,
+            mal_title_ja,
+            mal_image_url,
             status: final_status,
             last_updated: now,
             intervals,

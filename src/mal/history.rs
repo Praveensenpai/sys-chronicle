@@ -51,6 +51,14 @@ pub struct AnimeSyncRecord {
     pub mal_anime_id: Option<u64>,
     pub mal_current_ep: Option<u32>,
     pub mal_total_episodes: Option<u32>,
+    #[serde(default)]
+    pub mal_title: Option<String>,
+    #[serde(default)]
+    pub mal_title_en: Option<String>,
+    #[serde(default)]
+    pub mal_title_ja: Option<String>,
+    #[serde(default)]
+    pub mal_image_url: Option<String>,
     pub status: SyncStatus,
     pub last_updated: String,
     #[serde(default)]
@@ -69,8 +77,17 @@ pub struct ProgressUpdateParams<'a> {
     pub intervals: &'a [PlaybackInterval],
 }
 
-/// Per-anime reconciled metadata: (mal_anime_id, max_synced_episode, total_episodes).
-type AnimeMetadata = (Option<u64>, Option<u32>, Option<u32>);
+/// Per-anime reconciled metadata.
+#[derive(Default, Clone)]
+struct AnimeMeta {
+    mal_id: Option<u64>,
+    max_synced_ep: Option<u32>,
+    total_eps: Option<u32>,
+    mal_title: Option<String>,
+    mal_title_en: Option<String>,
+    mal_title_ja: Option<String>,
+    mal_image_url: Option<String>,
+}
 
 pub struct AnimeSyncHistory;
 
@@ -226,6 +243,10 @@ impl AnimeSyncHistory {
                 existing.mal_current_ep = existing.mal_current_ep.or(rec.mal_current_ep);
                 existing.mal_total_episodes =
                     existing.mal_total_episodes.or(rec.mal_total_episodes);
+                existing.mal_title = existing.mal_title.take().or(rec.mal_title);
+                existing.mal_title_en = existing.mal_title_en.take().or(rec.mal_title_en);
+                existing.mal_title_ja = existing.mal_title_ja.take().or(rec.mal_title_ja);
+                existing.mal_image_url = existing.mal_image_url.take().or(rec.mal_image_url);
 
                 if !rec.intervals.is_empty() {
                     existing.intervals =
@@ -243,34 +264,50 @@ impl AnimeSyncHistory {
         }
 
         // Reconcile MAL progress and metadata across episodes of the same anime
-        let mut anime_metadata: std::collections::HashMap<String, AnimeMetadata> =
+        let mut anime_metadata: std::collections::HashMap<String, AnimeMeta> =
             std::collections::HashMap::new();
 
         for r in &deduped {
             let key = r.canonical_title.trim().to_lowercase();
-            let entry = anime_metadata.entry(key).or_insert((None, None, None));
-            if r.mal_anime_id.is_some() && entry.0.is_none() {
-                entry.0 = r.mal_anime_id;
+            let entry = anime_metadata.entry(key).or_default();
+            if r.mal_anime_id.is_some() && entry.mal_id.is_none() {
+                entry.mal_id = r.mal_anime_id;
             }
             if let Some(cur) = r.mal_current_ep {
-                entry.1 = Some(entry.1.unwrap_or(0).max(cur));
+                entry.max_synced_ep = Some(entry.max_synced_ep.unwrap_or(0).max(cur));
             }
             if r.status == SyncStatus::Synced {
-                entry.1 = Some(entry.1.unwrap_or(0).max(r.episode));
+                entry.max_synced_ep = Some(entry.max_synced_ep.unwrap_or(0).max(r.episode));
             }
-            if r.mal_total_episodes.is_some() && entry.2.is_none() {
-                entry.2 = r.mal_total_episodes;
+            if r.mal_total_episodes.is_some() && entry.total_eps.is_none() {
+                entry.total_eps = r.mal_total_episodes;
+            }
+            if r.mal_title.is_some() && entry.mal_title.is_none() {
+                entry.mal_title = r.mal_title.clone();
+            }
+            if r.mal_title_en.is_some() && entry.mal_title_en.is_none() {
+                entry.mal_title_en = r.mal_title_en.clone();
+            }
+            if r.mal_title_ja.is_some() && entry.mal_title_ja.is_none() {
+                entry.mal_title_ja = r.mal_title_ja.clone();
+            }
+            if r.mal_image_url.is_some() && entry.mal_image_url.is_none() {
+                entry.mal_image_url = r.mal_image_url.clone();
             }
         }
 
         for r in &mut deduped {
             let key = r.canonical_title.trim().to_lowercase();
-            if let Some(&(mal_id, max_synced_ep, total_eps)) = anime_metadata.get(&key) {
-                r.mal_anime_id = r.mal_anime_id.or(mal_id);
-                r.mal_total_episodes = r.mal_total_episodes.or(total_eps);
-                r.mal_current_ep = r.mal_current_ep.or(max_synced_ep);
+            if let Some(meta) = anime_metadata.get(&key) {
+                r.mal_anime_id = r.mal_anime_id.or(meta.mal_id);
+                r.mal_total_episodes = r.mal_total_episodes.or(meta.total_eps);
+                r.mal_current_ep = r.mal_current_ep.or(meta.max_synced_ep);
+                r.mal_title = r.mal_title.take().or_else(|| meta.mal_title.clone());
+                r.mal_title_en = r.mal_title_en.take().or_else(|| meta.mal_title_en.clone());
+                r.mal_title_ja = r.mal_title_ja.take().or_else(|| meta.mal_title_ja.clone());
+                r.mal_image_url = r.mal_image_url.take().or_else(|| meta.mal_image_url.clone());
 
-                if let Some(max_ep) = max_synced_ep {
+                if let Some(max_ep) = meta.max_synced_ep {
                     if r.episode > 0 && r.episode <= max_ep && r.status == SyncStatus::Watching {
                         r.status = SyncStatus::Synced;
                         if r.duration_secs > 0 {
@@ -383,6 +420,10 @@ impl AnimeSyncHistory {
             existing.mal_anime_id = record.mal_anime_id.or(existing.mal_anime_id);
             existing.mal_current_ep = record.mal_current_ep.or(existing.mal_current_ep);
             existing.mal_total_episodes = record.mal_total_episodes.or(existing.mal_total_episodes);
+            existing.mal_title = record.mal_title.or(existing.mal_title.clone());
+            existing.mal_title_en = record.mal_title_en.or(existing.mal_title_en.clone());
+            existing.mal_title_ja = record.mal_title_ja.or(existing.mal_title_ja.clone());
+            existing.mal_image_url = record.mal_image_url.or(existing.mal_image_url.clone());
             existing.status = higher_status(existing.status.clone(), record.status);
         } else {
             records.insert(0, record);
@@ -448,6 +489,10 @@ impl AnimeSyncHistory {
                     mal_anime_id: None,
                     mal_current_ep: None,
                     mal_total_episodes: None,
+                    mal_title: None,
+                    mal_title_en: None,
+                    mal_title_ja: None,
+                    mal_image_url: None,
                     status,
                     last_updated: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                     intervals: params.intervals.to_vec(),

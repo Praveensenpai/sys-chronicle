@@ -24,7 +24,9 @@ use crate::logger::{ActivityEvent, LogWriter};
 use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
+pub mod media_cover;
 mod media_inspector;
+mod media_modal;
 mod media_picker;
 mod media_tab;
 use media_picker::{render_media_picker, MediaPickerState};

@@ -113,7 +113,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn get_valid_token (config : & mut MalConfig) -> Result < String >
   ```
 
-### `src/mal/candidate.rs` (Role: general, Lines: 488)
+### `src/mal/candidate.rs` (Role: general, Lines: 489)
 - **Responsibility**: Core general logic in src/mal/candidate.rs
 - **Imports**: use super :: client :: { MalAnimeNode , MediaKind } , use regex :: Regex 
 - **Types & Enums**:
@@ -146,11 +146,12 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn classify (raw_path_or_title : & str , gemini : Option < & GeminiParser > ,) -> Result < Option < MediaClassification > >
   ```
 
-### `src/mal/client.rs` (Role: cli, Lines: 205)
+### `src/mal/client.rs` (Role: cli, Lines: 221)
 - **Responsibility**: Core cli logic in src/mal/client.rs
 - **Imports**: use anyhow :: { Context , Result } , use reqwest :: { header , Client } , use serde :: { Deserialize , Serialize } 
 - **Types & Enums**:
   ```rust
+  pub struct MainPicture
   pub struct MalAnimeNode
   pub struct AlternativeTitles
   pub enum MediaKind
@@ -162,6 +163,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   ```
 - **Public Functions & Signatures**:
   ```rust
+  fn best_url (& self) -> Option < & str >
   fn all_titles (& self) -> Vec < & str >
   fn media_kind (& self) -> MediaKind
   fn new (token : String) -> Result < Self >
@@ -189,7 +191,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn parse (& self , raw_input : & str) -> Result < Option < AnimeInfo > >
   ```
 
-### `src/mal/handler.rs` (Role: general, Lines: 377)
+### `src/mal/handler.rs` (Role: general, Lines: 393)
 - **Responsibility**: Core general logic in src/mal/handler.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use std :: io :: { self , Read } , use std :: process :: Command , use super :: auth :: MalAuth , use super :: client :: MalClient , use super :: gemini :: GeminiParser , use super :: history :: { AnimeSyncHistory , AnimeSyncRecord , SyncStatus } , use super :: parser :: AnimeParser , use crate :: logger :: ActivityEvent 
 - **Types & Enums**:
@@ -203,11 +205,11 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn sync_media_with_options (raw_media : & str , duration_secs : u64 , watched_secs : u64 , force : bool ,) -> Result < Option < AnimeSyncRecord > >
   ```
 
-### `src/mal/history/tests.rs` (Role: general, Lines: 300)
+### `src/mal/history/tests.rs` (Role: general, Lines: 304)
 - **Responsibility**: Core general logic in src/mal/history/tests.rs
 - **Imports**: use super :: * 
 
-### `src/mal/history.rs` (Role: general, Lines: 483)
+### `src/mal/history.rs` (Role: general, Lines: 528)
 - **Responsibility**: Core general logic in src/mal/history.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use serde :: { Deserialize , Serialize } , use std :: fs :: { create_dir_all , OpenOptions } , use std :: io :: Write , use std :: path :: PathBuf , use crate :: monitor :: PlaybackInterval 
 - **Types & Enums**:
@@ -441,12 +443,32 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn install_user_service () -> Result < () >
   ```
 
-### `src/tui/media_inspector.rs` (Role: tui, Lines: 383)
-- **Responsibility**: Core tui logic in src/tui/media_inspector.rs
-- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , Paragraph , Wrap } , Frame , } , use super :: media_tab :: MediaTabState , use crate :: mal :: SyncStatus 
+### `src/tui/media_cover.rs` (Role: tui, Lines: 319)
+- **Responsibility**: Core tui logic in src/tui/media_cover.rs
+- **Imports**: use ratatui :: { layout :: { Alignment , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Paragraph } , Frame , } , use sha2 :: { Digest , Sha256 } , use std :: collections :: { HashMap , HashSet } , use std :: path :: { Path , PathBuf } , use std :: sync :: { Arc , Mutex } , use crate :: mal :: history :: AnimeSyncRecord 
+- **Types & Enums**:
+  ```rust
+  pub struct CoverCache
+  ```
 - **Public Functions & Signatures**:
   ```rust
-  fn render_anime_inspector (f : & mut Frame , area : Rect , state : & MediaTabState)
+  fn new () -> Self
+  fn render (& mut self , f : & mut Frame , area : Rect , record : & AnimeSyncRecord)
+  ```
+
+### `src/tui/media_inspector.rs` (Role: tui, Lines: 354)
+- **Responsibility**: Core tui logic in src/tui/media_inspector.rs
+- **Imports**: use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Gauge , Paragraph , Wrap } , Frame , } , use regex :: Regex , use super :: media_tab :: MediaTabState , use crate :: mal :: history :: AnimeSyncRecord , use crate :: mal :: SyncStatus 
+- **Public Functions & Signatures**:
+  ```rust
+  fn render_anime_inspector (f : & mut Frame , area : Rect , state : & mut MediaTabState)
+  ```
+
+### `src/tui/media_modal.rs` (Role: tui, Lines: 90)
+- **Responsibility**: Core tui logic in src/tui/media_modal.rs
+- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Paragraph } , Frame , } , use super :: media_tab :: MediaTabState , use crate :: mal :: SyncStatus 
+- **Public Functions & Signatures**:
+  ```rust
   fn render_force_sync_modal (f : & mut Frame , area : Rect , state : & MediaTabState)
   ```
 
@@ -474,13 +496,13 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_picker (f : & mut Frame , area : Rect , state : & MediaPickerState)
   ```
 
-### `src/tui/media_tab/tests.rs` (Role: tui, Lines: 230)
+### `src/tui/media_tab/tests.rs` (Role: tui, Lines: 270)
 - **Responsibility**: Core tui logic in src/tui/media_tab/tests.rs
 - **Imports**: use super :: * 
 
-### `src/tui/media_tab.rs` (Role: tui, Lines: 402)
+### `src/tui/media_tab.rs` (Role: tui, Lines: 410)
 - **Responsibility**: Core tui logic in src/tui/media_tab.rs
-- **Imports**: use chrono :: { Datelike , Local , NaiveDate , NaiveDateTime } , use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , List , ListItem , ListState , Paragraph } , Frame , } , use std :: collections :: HashMap , use std :: time :: Instant , use super :: media_inspector :: { render_anime_inspector , render_force_sync_modal } , use crate :: mal :: { AnimeSyncHistory , AnimeSyncRecord , MalHandler , SyncStatus } 
+- **Imports**: use chrono :: { Datelike , Local , NaiveDate , NaiveDateTime } , use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , List , ListItem , ListState , Paragraph } , Frame , } , use std :: collections :: HashMap , use std :: time :: Instant , use super :: media_inspector :: render_anime_inspector , use super :: media_modal :: render_force_sync_modal , use crate :: mal :: { AnimeSyncHistory , AnimeSyncRecord , MalHandler , SyncStatus } 
 - **Types & Enums**:
   ```rust
   pub enum GroupMode
@@ -501,7 +523,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_tab (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
-### `src/tui.rs` (Role: tui, Lines: 1619)
+### `src/tui.rs` (Role: tui, Lines: 1621)
 - **Responsibility**: Core tui logic in src/tui.rs
 - **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: { Disks , System } , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
 - **Public Functions & Signatures**:
@@ -521,7 +543,3 @@ cargo build --release --target x86_64-unknown-linux-gnu
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
-
-## 6. Recent Iteration Changes
-- **2026-11-15**: Added storage telemetry. New `src/monitor/disk.rs` samples the volume backing `/` via `sysinfo::Disks` (used/total GB, fill %, filesystem, SSD/HDD class). `MetricsSnapshot` and `ActivityEvent::SystemMetrics` gained `disk_used_gb`/`disk_total_gb`/`disk_pct`/`disk_label` (serde defaults keep pre-existing logs readable). TUI renders a third `💾 Disk Usage` gauge; `status --plain` and the AI report expose the same figures. Split `src/exporter/ai.rs` into `format.rs` (pure helpers) and `metrics.rs` (resource section) to keep every file under the 400-line limit.
-

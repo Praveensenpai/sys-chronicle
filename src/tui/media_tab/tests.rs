@@ -13,6 +13,10 @@ fn rec(title: &str, episode: u32, updated: &str) -> AnimeSyncRecord {
         mal_anime_id: None,
         mal_current_ep: None,
         mal_total_episodes: None,
+        mal_title: None,
+        mal_title_en: None,
+        mal_title_ja: None,
+        mal_image_url: None,
         status: SyncStatus::Watching,
         last_updated: updated.to_string(),
         intervals: vec![],
@@ -182,6 +186,7 @@ fn state_with(records: Vec<AnimeSyncRecord>, mode: GroupMode) -> MediaTabState {
         confirming_force_sync: false,
         list_state,
         group_mode: mode,
+        cover_cache: super::super::media_cover::CoverCache::new(),
     }
 }
 
@@ -227,4 +232,39 @@ fn render_media_tab_does_not_panic_on_multibyte_titles() {
             result.err()
         );
     }
+}
+
+#[test]
+fn render_media_inspector_with_cover_and_titles() {
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let mut record = rec("Non Non Biyori", 1, "2026-11-21 23:25:35");
+    record.mal_title = Some("Non Non Biyori Nonstop".into());
+    record.mal_title_ja = Some("のんのんびより のんすとっぷ".into());
+    record.mal_title_en = Some("Non Non Biyori Nonstop Season 3".into());
+    record.mal_anime_id = Some(39808);
+
+    let mut state = state_with(vec![record], GroupMode::Day);
+    let backend = TestBackend::new(160, 40);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    let result = terminal.draw(|f| {
+        let area = f.size();
+        render_media_tab(f, area, &mut state);
+    });
+
+    assert!(result.is_ok());
+    let buffer = terminal.backend().buffer();
+    let content = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.get(x, y).symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(content.contains("Cover"));
+    assert!(content.contains("Non Non Biyori Nonstop"));
+    assert!(content.contains("Fetching Cover"));
 }

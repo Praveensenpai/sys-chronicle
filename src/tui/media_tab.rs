@@ -9,7 +9,8 @@ use ratatui::{
 use std::collections::HashMap;
 use std::time::Instant;
 
-use super::media_inspector::{render_anime_inspector, render_force_sync_modal};
+use super::media_inspector::render_anime_inspector;
+use super::media_modal::render_force_sync_modal;
 use crate::mal::{AnimeSyncHistory, AnimeSyncRecord, MalHandler, SyncStatus};
 
 const TIMESTAMP_FMT: &str = "%Y-%m-%d %H:%M:%S";
@@ -57,6 +58,7 @@ pub struct MediaTabState {
     pub confirming_force_sync: bool,
     pub list_state: ListState,
     pub group_mode: GroupMode,
+    pub cover_cache: super::media_cover::CoverCache,
 }
 
 impl MediaTabState {
@@ -73,6 +75,7 @@ impl MediaTabState {
             confirming_force_sync: false,
             list_state,
             group_mode: GroupMode::Day,
+            cover_cache: super::media_cover::CoverCache::new(),
         }
     }
 
@@ -273,7 +276,12 @@ fn record_item(record: &AnimeSyncRecord, index: usize, is_sel: bool) -> ListItem
         _ => (record.status.badge().0.to_string(), record.status.badge().1),
     };
 
-    let title_display = super::truncate_name(&record.canonical_title, TITLE_COL_WIDTH);
+    let raw_title = record
+        .mal_title
+        .as_deref()
+        .unwrap_or(&record.canonical_title);
+    let title_clean = super::media_inspector::clean_display_title(raw_title);
+    let title_display = super::truncate_name(&title_clean, TITLE_COL_WIDTH);
 
     ListItem::new(Line::from(vec![
         Span::styled(
@@ -343,7 +351,7 @@ fn render_empty_media(f: &mut Frame, area: Rect, block: Block<'_>) {
 pub fn render_media_tab(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(area);
 
     render_anime_list(f, chunks[0], state);

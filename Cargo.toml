@@ -1,6 +1,6 @@
 [package]
 name = "sys-chronicle"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["Praveensenpai"]
 description = "Timestamped system activity logger (apps, power, CPU/RAM) for AI analysis"
@@ -26,6 +26,7 @@ sysinfo = "0.30"
 tokio = { version = "1.38", features = ["full"] }
 anyhow = "1.0"
 dirs = "5.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 ratatui = "0.26"
 crossterm = "0.27"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
