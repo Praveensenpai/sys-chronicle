@@ -268,7 +268,7 @@ fn render_inspector_top(
     if show_cover {
         let top_split = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(26), Constraint::Min(20)])
+            .constraints([Constraint::Length(22), Constraint::Min(22)])
             .split(area);
 
         let cover_block = Block::default()
@@ -318,7 +318,7 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &mut MediaTabSta
 
     let show_cover = area.width >= 46 && area.height >= 22;
     let top_len = if show_cover {
-        13.min(area.height.saturating_sub(12))
+        13.min(area.height.saturating_sub(11)).max(9)
     } else {
         7
     };

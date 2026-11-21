@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::media_kitty::{clear_kitty_graphics, is_kitty_terminal, transmit_kitty_image};
+use super::media_kitty::{
+    clear_kitty_graphics, compute_portrait_cells, is_kitty_terminal, transmit_kitty_image,
+};
 use crate::mal::history::AnimeSyncRecord;
 
 /// In-memory cache for rendered cover graphics (Kitty protocol or Unicode half-blocks).
@@ -250,9 +252,16 @@ async fn fetch_cover_worker(
 
 fn decode_halfblocks(path: &Path, width: u16, height: u16) -> Option<Vec<Line<'static>>> {
     let img = image::open(path).ok()?.to_rgb8();
-    let target_w = width as u32;
-    let target_h = (height as u32) * 2;
+    let (orig_w, orig_h) = (img.width(), img.height());
+    let (disp_cols, disp_rows, col_offset, row_offset) =
+        compute_portrait_cells(orig_w, orig_h, width, height);
 
+    if disp_cols == 0 || disp_rows == 0 {
+        return None;
+    }
+
+    let target_w = disp_cols as u32;
+    let target_h = (disp_rows as u32) * 2;
     let resized = image::imageops::resize(
         &img,
         target_w,
@@ -261,13 +270,24 @@ fn decode_halfblocks(path: &Path, width: u16, height: u16) -> Option<Vec<Line<'s
     );
 
     let mut lines = Vec::with_capacity(height as usize);
+    for _ in 0..row_offset {
+        lines.push(Line::from(" ".repeat(width as usize)));
+    }
 
-    for y in 0..height {
-        let mut spans = Vec::with_capacity(width as usize);
+    let right_pad = (width as usize).saturating_sub(disp_cols as usize + col_offset as usize);
+    let left_pad_str = " ".repeat(col_offset as usize);
+    let right_pad_str = " ".repeat(right_pad);
+
+    for y in 0..disp_rows {
+        let mut spans = Vec::with_capacity(disp_cols as usize + 2);
+        if col_offset > 0 {
+            spans.push(Span::raw(left_pad_str.clone()));
+        }
+
         let top_y = (y as u32) * 2;
         let bot_y = top_y + 1;
 
-        for x in 0..width {
+        for x in 0..disp_cols {
             let top_p = resized.get_pixel(x as u32, top_y);
             let bot_p = if bot_y < target_h {
                 resized.get_pixel(x as u32, bot_y)
@@ -280,7 +300,16 @@ fn decode_halfblocks(path: &Path, width: u16, height: u16) -> Option<Vec<Line<'s
 
             spans.push(Span::styled("▀", Style::default().fg(fg).bg(bg)));
         }
+
+        if right_pad > 0 {
+            spans.push(Span::raw(right_pad_str.clone()));
+        }
         lines.push(Line::from(spans));
+    }
+
+    let remaining_rows = (height as usize).saturating_sub(lines.len());
+    for _ in 0..remaining_rows {
+        lines.push(Line::from(" ".repeat(width as usize)));
     }
 
     Some(lines)
@@ -292,9 +321,9 @@ fn render_placeholder(f: &mut Frame, area: Rect, is_fetching: bool) {
         .border_style(Style::default().fg(Color::DarkGray));
 
     let label = if is_fetching {
-        "⏳ Fetching Cover..."
+        "Fetching Cover"
     } else {
-        "🎬 No Cover Art"
+        "No Cover Art"
     };
 
     let lines = vec![

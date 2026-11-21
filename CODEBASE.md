@@ -439,9 +439,9 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn install_user_service () -> Result < () >
   ```
 
-### `src/tui/media_cover.rs` (Role: tui, Lines: 350)
+### `src/tui/media_cover.rs` (Role: tui, Lines: 379)
 - **Responsibility**: Core tui logic in src/tui/media_cover.rs
-- **Imports**: use ratatui :: { layout :: { Alignment , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Paragraph } , Frame , } , use sha2 :: { Digest , Sha256 } , use std :: collections :: { HashMap , HashSet } , use std :: path :: { Path , PathBuf } , use std :: sync :: { Arc , Mutex } , use super :: media_kitty :: { clear_kitty_graphics , is_kitty_terminal , transmit_kitty_image } , use crate :: mal :: history :: AnimeSyncRecord 
+- **Imports**: use ratatui :: { layout :: { Alignment , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Paragraph } , Frame , } , use sha2 :: { Digest , Sha256 } , use std :: collections :: { HashMap , HashSet } , use std :: path :: { Path , PathBuf } , use std :: sync :: { Arc , Mutex } , use super :: media_kitty :: { clear_kitty_graphics , compute_portrait_cells , is_kitty_terminal , transmit_kitty_image , } , use crate :: mal :: history :: AnimeSyncRecord 
 - **Types & Enums**:
   ```rust
   pub struct CoverCache
@@ -460,7 +460,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_anime_inspector (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
-### `src/tui/media_kitty.rs` (Role: tui, Lines: 106)
+### `src/tui/media_kitty.rs` (Role: tui, Lines: 168)
 - **Responsibility**: Core tui logic in src/tui/media_kitty.rs
 - **Imports**: use base64 :: Engine , use ratatui :: layout :: Rect , use std :: io :: Write , use std :: path :: Path 
 - **Public Functions & Signatures**:
@@ -468,7 +468,8 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn is_kitty_terminal () -> bool
   fn emit_raw_escape (seq : & str , in_tmux : bool)
   fn clear_kitty_graphics ()
-  fn transmit_kitty_image (path : & Path , area : Rect) -> Result < () , Box < dyn std :: error :: Error + Send + Sync > >
+  fn compute_portrait_cells (orig_w : u32 , orig_h : u32 , area_w : u16 , area_h : u16 ,) -> (u16 , u16 , u16 , u16)
+  fn transmit_kitty_image (path : & Path , area : Rect ,) -> Result < () , Box < dyn std :: error :: Error + Send + Sync > >
   ```
 
 ### `src/tui/media_modal.rs` (Role: tui, Lines: 90)
