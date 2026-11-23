@@ -403,6 +403,7 @@ pub fn run_status_tui() -> Result<()> {
     loop {
         media_picker_state.poll();
         media_picker_state.tick();
+        media_tab_state.tick();
         let now = Local::now();
 
         // Sample current data if not paused

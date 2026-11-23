@@ -70,6 +70,40 @@ fn build_title_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
     lines
 }
 
+pub fn format_display_path(path: &str, max_len: usize) -> String {
+    if path.chars().count() <= max_len {
+        return path.to_string();
+    }
+    let p = std::path::Path::new(path);
+    let file_name = p.file_name().and_then(|f| f.to_str()).unwrap_or(path);
+    let parent_name = p.parent().and_then(|p| p.file_name()).and_then(|f| f.to_str());
+
+    if let Some(parent) = parent_name {
+        let candidate = format!(".../{}/{}", parent, file_name);
+        if candidate.chars().count() <= max_len {
+            return candidate;
+        }
+    }
+
+    let file_cand = format!(".../{}", file_name);
+    if file_cand.chars().count() <= max_len {
+        return file_cand;
+    }
+
+    let char_count = file_name.chars().count();
+    if max_len <= 8 || char_count <= 8 {
+        let take_n = max_len.saturating_sub(3).max(1);
+        let end: String = file_name.chars().skip(char_count.saturating_sub(take_n)).collect();
+        return format!("...{}", end);
+    }
+
+    let avail = max_len.saturating_sub(6);
+    let half = avail / 2;
+    let start: String = file_name.chars().take(half).collect();
+    let end: String = file_name.chars().skip(char_count.saturating_sub(avail - half)).collect();
+    format!(".../{}..{}", start, end)
+}
+
 fn build_stats_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
     let pos_str = format!(
         "{} / {}",
@@ -82,7 +116,8 @@ fn build_stats_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
         format_time(r.duration_secs),
         r.watch_pct
     );
-    let file_str = super::truncate_name(&r.raw_title, max_w.saturating_sub(10).max(12));
+    let raw_path = r.path.as_deref().unwrap_or(&r.raw_title);
+    let file_str = format_display_path(raw_path, max_w.saturating_sub(10).max(12));
     let id_label = r
         .mal_anime_id
         .map(|id| format!("#{}", id))
@@ -287,14 +322,41 @@ fn render_inspector_top(
     }
 }
 
-fn render_status_footer(f: &mut Frame, area: Rect, msg: Option<&(String, std::time::Instant)>) {
-    let status_text = if let Some((m, _)) = msg {
+fn render_status_footer(f: &mut Frame, area: Rect, state: &MediaTabState) {
+    let is_syncing = state.sync_rx.is_some();
+    let status_text = if is_syncing {
+        let msg = state
+            .status_message
+            .as_ref()
+            .map(|(m, _)| m.as_str())
+            .unwrap_or("Syncing to MAL in background...");
+        let clean = truncate_footer_message(msg, area.width as usize);
         Line::from(Span::styled(
-            m,
+            clean,
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ))
+    } else if let Some((m, inst)) = &state.status_message {
+        if inst.elapsed() < std::time::Duration::from_secs(5) {
+            let color = if m.starts_with('✔') {
+                Color::LightGreen
+            } else if m.starts_with('✖') {
+                Color::LightRed
+            } else {
+                Color::Yellow
+            };
+            let clean = truncate_footer_message(m, area.width as usize);
+            Line::from(Span::styled(
+                clean,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(
+                "[s/Enter] Sync   [f] Force Sync   [r] Refresh",
+                Style::default().fg(Color::DarkGray),
+            ))
+        }
     } else {
         Line::from(Span::styled(
             "[s/Enter] Sync   [f] Force Sync   [r] Refresh",
@@ -302,6 +364,19 @@ fn render_status_footer(f: &mut Frame, area: Rect, msg: Option<&(String, std::ti
         ))
     };
     f.render_widget(Paragraph::new(status_text), area);
+}
+
+fn truncate_footer_message(msg: &str, max_width: usize) -> String {
+    let limit = max_width.saturating_sub(1);
+    if limit == 0 {
+        return String::new();
+    }
+    if msg.chars().count() > limit {
+        let truncated: String = msg.chars().take(limit.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    } else {
+        msg.to_string()
+    }
 }
 
 pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
@@ -350,5 +425,5 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &mut MediaTabSta
         inner[3],
     );
 
-    render_status_footer(f, inner[4], state.status_message.as_ref());
+    render_status_footer(f, inner[4], state);
 }

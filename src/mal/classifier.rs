@@ -154,11 +154,42 @@ impl AnimeClassifier {
             }
         }
 
+        if let Ok(overrides) = super::overrides::AnimeOverrides::load() {
+            if let Some(ov) = overrides.lookup(raw_path_or_title) {
+                let ep = super::parser::AnimeParser::parse(raw_path_or_title)
+                    .map(|i| i.episode)
+                    .unwrap_or_else(|| Self::extract_fallback_episode(raw_path_or_title));
+                return Ok(Some(MediaClassification::AnimeEpisode(AnimeInfo {
+                    title: ov.canonical_title.clone(),
+                    episode: ep,
+                    season: None,
+                })));
+            }
+        }
+
         if let Some(info) = super::parser::AnimeParser::parse(raw_path_or_title) {
             return Ok(Some(MediaClassification::AnimeEpisode(info)));
         }
 
         Ok(None)
+    }
+
+    pub(crate) fn extract_fallback_episode(raw_path: &str) -> u32 {
+        let Some(file_name) = Path::new(raw_path).file_name().and_then(|f| f.to_str()) else {
+            return 1;
+        };
+        let Ok(re) = Regex::new(r"(?i)(?:ep|episode|e|ova|oad|sp)?\s*(\d{1,4})") else {
+            return 1;
+        };
+        for cap in re.captures_iter(file_name) {
+            let Some(m) = cap.get(1) else { continue };
+            if let Ok(num) = m.as_str().parse::<u32>() {
+                if num > 0 {
+                    return num;
+                }
+            }
+        }
+        1
     }
 }
 

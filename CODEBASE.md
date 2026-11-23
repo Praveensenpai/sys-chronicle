@@ -128,7 +128,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn select_best_candidate < 'a > (candidates : & 'a [MalAnimeNode] , query_title : & str , target_season : Option < u32 > ,) -> Option < & 'a MalAnimeNode >
   ```
 
-### `src/mal/classifier.rs` (Role: general, Lines: 201)
+### `src/mal/classifier.rs` (Role: general, Lines: 232)
 - **Responsibility**: Core general logic in src/mal/classifier.rs
 - **Imports**: use anyhow :: Result , use regex :: Regex , use std :: path :: Path , use super :: gemini :: GeminiParser , use super :: parser :: AnimeInfo 
 - **Types & Enums**:
@@ -187,7 +187,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn parse (& self , raw_input : & str) -> Result < Option < AnimeInfo > >
   ```
 
-### `src/mal/handler.rs` (Role: general, Lines: 393)
+### `src/mal/handler.rs` (Role: general, Lines: 405)
 - **Responsibility**: Core general logic in src/mal/handler.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use std :: io :: { self , Read } , use std :: process :: Command , use super :: auth :: MalAuth , use super :: client :: MalClient , use super :: gemini :: GeminiParser , use super :: history :: { AnimeSyncHistory , AnimeSyncRecord , SyncStatus } , use super :: parser :: AnimeParser , use crate :: logger :: ActivityEvent 
 - **Types & Enums**:
@@ -201,11 +201,11 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn sync_media_with_options (raw_media : & str , duration_secs : u64 , watched_secs : u64 , force : bool ,) -> Result < Option < AnimeSyncRecord > >
   ```
 
-### `src/mal/history/tests.rs` (Role: general, Lines: 304)
+### `src/mal/history/tests.rs` (Role: general, Lines: 363)
 - **Responsibility**: Core general logic in src/mal/history/tests.rs
 - **Imports**: use super :: * 
 
-### `src/mal/history.rs` (Role: general, Lines: 528)
+### `src/mal/history.rs` (Role: general, Lines: 633)
 - **Responsibility**: Core general logic in src/mal/history.rs
 - **Imports**: use anyhow :: { Context , Result } , use chrono :: Local , use serde :: { Deserialize , Serialize } , use std :: fs :: { create_dir_all , OpenOptions } , use std :: io :: Write , use std :: path :: PathBuf , use crate :: monitor :: PlaybackInterval 
 - **Types & Enums**:
@@ -219,7 +219,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   ```rust
   fn badge (& self) -> (& 'static str , ratatui :: style :: Color)
   fn storage_path () -> PathBuf
-  fn deduplicate (records : Vec < AnimeSyncRecord >) -> Vec < AnimeSyncRecord >
+  fn deduplicate (mut records : Vec < AnimeSyncRecord >) -> Vec < AnimeSyncRecord >
   fn load_all () -> Result < Vec < AnimeSyncRecord > >
   fn save_all (records : & [AnimeSyncRecord]) -> Result < () >
   fn upsert (record : AnimeSyncRecord) -> Result < () >
@@ -228,13 +228,14 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn update_progress (raw_title : & str , canonical_title : & str , episode : u32 , path : Option < String > , duration_secs : u64 , watched_secs : u64 ,) -> Result < () >
   ```
 
-### `src/mal/overrides.rs` (Role: general, Lines: 287)
+### `src/mal/overrides.rs` (Role: general, Lines: 383)
 - **Responsibility**: Core general logic in src/mal/overrides.rs
 - **Imports**: use anyhow :: { Context , Result } , use serde :: { Deserialize , Serialize } , use std :: fs :: OpenOptions , use std :: io :: Write , use std :: path :: { Path , PathBuf } , use super :: history :: { AnimeSyncHistory , AnimeSyncRecord } 
 - **Types & Enums**:
   ```rust
   pub struct AnimeOverride
   pub struct AnimeOverrides
+  pub struct ReassignMetadata
   ```
 - **Public Functions & Signatures**:
   ```rust
@@ -247,9 +248,10 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn remove (& mut self , folder : & Path) -> Option < AnimeOverride >
   fn lookup (& self , media_path : & str) -> Option < & AnimeOverride >
   fn reassign_history (folder : & Path , mal_anime_id : u64 , canonical_title : & str , total_episodes : Option < u32 > ,) -> Result < usize >
+  fn reassign_history_with_meta (folder : & Path , meta : & ReassignMetadata ,) -> Result < usize >
   ```
 
-### `src/mal/parser.rs` (Role: general, Lines: 175)
+### `src/mal/parser.rs` (Role: general, Lines: 220)
 - **Responsibility**: Core general logic in src/mal/parser.rs
 - **Imports**: use regex :: Regex , use std :: path :: Path 
 - **Types & Enums**:
@@ -324,7 +326,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   async fn run (& mut self , running : Arc < AtomicBool >) -> Result < () >
   ```
 
-### `src/monitor/mpv_session.rs` (Role: general, Lines: 266)
+### `src/monitor/mpv_session.rs` (Role: general, Lines: 290)
 - **Responsibility**: Core general logic in src/monitor/mpv_session.rs
 - **Imports**: use chrono :: Local , use std :: path :: Path , use crate :: mal :: history :: ProgressUpdateParams , use crate :: mal :: { AnimeParser , AnimeSyncHistory , SyncStatus } , use crate :: monitor :: mpv :: MpvMonitor , use crate :: monitor :: timeline_tracker :: { PlaybackInterval , UniqueTimelineTracker } 
 - **Types & Enums**:
@@ -452,11 +454,12 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render (& mut self , f : & mut Frame , area : Rect , record : & AnimeSyncRecord)
   ```
 
-### `src/tui/media_inspector.rs` (Role: tui, Lines: 354)
+### `src/tui/media_inspector.rs` (Role: tui, Lines: 429)
 - **Responsibility**: Core tui logic in src/tui/media_inspector.rs
 - **Imports**: use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Gauge , Paragraph , Wrap } , Frame , } , use regex :: Regex , use super :: media_tab :: MediaTabState , use crate :: mal :: history :: AnimeSyncRecord , use crate :: mal :: SyncStatus 
 - **Public Functions & Signatures**:
   ```rust
+  fn format_display_path (path : & str , max_len : usize) -> String
   fn render_anime_inspector (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
@@ -480,9 +483,9 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_force_sync_modal (f : & mut Frame , area : Rect , state : & MediaTabState)
   ```
 
-### `src/tui/media_picker.rs` (Role: tui, Lines: 452)
+### `src/tui/media_picker.rs` (Role: tui, Lines: 463)
 - **Responsibility**: Core tui logic in src/tui/media_picker.rs
-- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , List , ListItem , Paragraph } , Frame , } , use std :: path :: PathBuf , use std :: sync :: mpsc :: { self , Receiver , Sender , TryRecvError } , use std :: time :: { Duration , Instant } , use crate :: mal :: client :: MalAnimeNode , use crate :: mal :: overrides :: reassign_history , use crate :: mal :: { AnimeOverrides , MalAuth , MalClient } 
+- **Imports**: use ratatui :: { layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , List , ListItem , Paragraph } , Frame , } , use std :: path :: PathBuf , use std :: sync :: mpsc :: { self , Receiver , Sender , TryRecvError } , use std :: time :: { Duration , Instant } , use crate :: mal :: client :: MalAnimeNode , use crate :: mal :: { AnimeOverrides , MalAuth , MalClient } 
 - **Types & Enums**:
   ```rust
   pub struct MediaPickerState
@@ -504,11 +507,11 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_picker (f : & mut Frame , area : Rect , state : & MediaPickerState)
   ```
 
-### `src/tui/media_tab/tests.rs` (Role: tui, Lines: 270)
+### `src/tui/media_tab/tests.rs` (Role: tui, Lines: 295)
 - **Responsibility**: Core tui logic in src/tui/media_tab/tests.rs
 - **Imports**: use super :: * 
 
-### `src/tui/media_tab.rs` (Role: tui, Lines: 410)
+### `src/tui/media_tab.rs` (Role: tui, Lines: 449)
 - **Responsibility**: Core tui logic in src/tui/media_tab.rs
 - **Imports**: use chrono :: { Datelike , Local , NaiveDate , NaiveDateTime } , use ratatui :: { layout :: { Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , List , ListItem , ListState , Paragraph } , Frame , } , use std :: collections :: HashMap , use std :: time :: Instant , use super :: media_inspector :: render_anime_inspector , use super :: media_modal :: render_force_sync_modal , use crate :: mal :: { AnimeSyncHistory , AnimeSyncRecord , MalHandler , SyncStatus } 
 - **Types & Enums**:
@@ -521,6 +524,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn next (self) -> Self
   fn label (self) -> & 'static str
   fn new () -> Self
+  fn tick (& mut self)
   fn refresh (& mut self)
   fn cycle_group_mode (& mut self)
   fn select_next (& mut self)
@@ -531,7 +535,7 @@ Entrypoint ──> CLI/Parser ──> Domain Logic ──> Infra/IO
   fn render_media_tab (f : & mut Frame , area : Rect , state : & mut MediaTabState)
   ```
 
-### `src/tui.rs` (Role: tui, Lines: 1628)
+### `src/tui.rs` (Role: tui, Lines: 1629)
 - **Responsibility**: Core tui logic in src/tui.rs
 - **Imports**: use anyhow :: Result , use chrono :: { DateTime , Local } , use crossterm :: { event :: { self , Event , KeyCode , KeyModifiers } , execute , terminal :: { disable_raw_mode , enable_raw_mode , EnterAlternateScreen , LeaveAlternateScreen } , } , use ratatui :: { backend :: CrosstermBackend , layout :: { Alignment , Constraint , Direction , Layout , Rect } , style :: { Color , Modifier , Style } , text :: { Line , Span } , widgets :: { Block , Borders , Clear , Gauge , List , ListItem , ListState , Paragraph , Wrap } , Terminal , } , use std :: collections :: BTreeMap , use std :: io :: stdout , use std :: process :: { Command , Stdio } , use std :: time :: { Duration , Instant } , use sysinfo :: { Disks , System } , use crate :: exporter :: generate_ai_report , use crate :: logger :: { ActivityEvent , LogWriter } , use crate :: monitor :: metrics :: AppDetail , use crate :: monitor :: { MetricsMonitor , PowerMonitor , WindowMonitor } , use media_picker :: { render_media_picker , MediaPickerState } , use media_tab :: { render_media_tab , MediaTabState } 
 - **Public Functions & Signatures**:

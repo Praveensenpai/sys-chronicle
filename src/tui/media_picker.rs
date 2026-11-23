@@ -10,7 +10,6 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use crate::mal::client::MalAnimeNode;
-use crate::mal::overrides::reassign_history;
 use crate::mal::{AnimeOverrides, MalAuth, MalClient};
 
 /// Delay applied after the last keystroke before hitting the MAL API.
@@ -218,7 +217,19 @@ impl MediaPickerState {
             return Some(format!("Could not save override: {e}"));
         }
 
-        let touched = reassign_history(&folder, anime.id, &anime.title, total).unwrap_or(0);
+        let meta = crate::mal::overrides::ReassignMetadata {
+            mal_anime_id: anime.id,
+            canonical_title: anime.title.clone(),
+            total_episodes: total,
+            mal_title: Some(anime.title.clone()),
+            mal_title_en: anime.alternative_titles.as_ref().and_then(|a| a.english.clone()),
+            mal_title_ja: anime.alternative_titles.as_ref().and_then(|a| a.japanese.clone()),
+            mal_image_url: anime
+                .main_picture
+                .as_ref()
+                .and_then(|p| p.best_url().map(String::from)),
+        };
+        let touched = crate::mal::overrides::reassign_history_with_meta(&folder, &meta).unwrap_or(0);
         self.close();
         Some(format!(
             "Bound {} -> {} ({}); updated {} record(s)",

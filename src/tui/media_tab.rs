@@ -59,6 +59,7 @@ pub struct MediaTabState {
     pub list_state: ListState,
     pub group_mode: GroupMode,
     pub cover_cache: super::media_cover::CoverCache,
+    pub sync_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
 }
 
 impl MediaTabState {
@@ -76,6 +77,20 @@ impl MediaTabState {
             list_state,
             group_mode: GroupMode::Day,
             cover_cache: super::media_cover::CoverCache::new(),
+            sync_rx: None,
+        }
+    }
+
+    pub fn tick(&mut self) {
+        if let Some(ref rx) = self.sync_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.sync_rx = None;
+                self.refresh();
+                match result {
+                    Ok(msg) => self.set_status(msg),
+                    Err(err) => self.set_status(format!("✖ {err}")),
+                }
+            }
         }
     }
 
@@ -149,9 +164,25 @@ impl MediaTabState {
         let duration = record.duration_secs;
         let watched = record.watched_secs;
 
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.sync_rx = Some(rx);
+
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = MalHandler::sync_media_with_options(&raw, duration, watched, force).await;
+                let res = MalHandler::sync_media_with_options(&raw, duration, watched, force).await;
+                let outcome = match res {
+                    Ok(Some(r)) => {
+                        let ep_label = if r.episode > 0 {
+                            format!("Ep {}", r.episode)
+                        } else {
+                            "OVA/Special".to_string()
+                        };
+                        Ok(format!("✔ Synced \"{}\" {ep_label} to MyAnimeList", r.canonical_title))
+                    }
+                    Ok(None) => Err("Could not identify anime title/episode to sync".to_string()),
+                    Err(e) => Err(format!("Sync error: {e}")),
+                };
+                let _ = tx.send(outcome);
             });
         } else {
             std::thread::spawn(move || {
@@ -160,7 +191,15 @@ impl MediaTabState {
                 if force {
                     cmd.arg("--force");
                 }
-                let _ = cmd.status();
+                cmd.stdout(std::process::Stdio::null());
+                cmd.stderr(std::process::Stdio::null());
+                let status = cmd.status();
+                let outcome = match status {
+                    Ok(s) if s.success() => Ok(format!("✔ Synced \"{title}\" to MyAnimeList")),
+                    Ok(s) => Err(format!("sys-chronicle-mal exited with status {s}")),
+                    Err(e) => Err(format!("Failed to execute sys-chronicle-mal: {e}")),
+                };
+                let _ = tx.send(outcome);
             });
         }
     }

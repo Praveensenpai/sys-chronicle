@@ -13,6 +13,18 @@ use crate::logger::ActivityEvent;
 
 pub struct MalHandler;
 
+pub(crate) fn mal_println(msg: impl std::fmt::Display) {
+    if !crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
+        println!("{msg}");
+    }
+}
+
+pub(crate) fn mal_eprintln(msg: impl std::fmt::Display) {
+    if !crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
+        eprintln!("{msg}");
+    }
+}
+
 impl MalHandler {
     pub async fn handle_stdin_hook() -> Result<()> {
         let mut input = String::new();
@@ -25,7 +37,7 @@ impl MalHandler {
         let event: ActivityEvent = match serde_json::from_str(&input) {
             Ok(ev) => ev,
             Err(e) => {
-                eprintln!("[sys-chronicle-mal] Ignoring non-ActivityEvent JSON: {}", e);
+                mal_eprintln(format!("[sys-chronicle-mal] Ignoring non-ActivityEvent JSON: {}", e));
                 return Ok(());
             }
         };
@@ -39,10 +51,10 @@ impl MalHandler {
                 watch_pct,
                 ..
             } => {
-                println!(
+                mal_println(format!(
                     "[sys-chronicle-mal] Received 80% watch threshold for: \"{}\" ({:.1}%)",
                     title, watch_pct
-                );
+                ));
                 let raw_media = path.as_deref().unwrap_or(&title);
                 Self::sync_media_with_options(raw_media, duration_secs, watched_secs, false)
                     .await?;
@@ -113,10 +125,10 @@ impl MalHandler {
                 content_type,
                 reason,
             }) => {
-                println!(
+                mal_println(format!(
                     "[sys-chronicle-mal] Skipping MAL sync for non-syncable media: \"{}\" ({}) - {}",
                     title, content_type, reason
-                );
+                ));
                 let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 let existing = AnimeSyncHistory::find_record(raw_media, &title, 0);
                 let final_dur = if duration_secs > 0 {
@@ -159,26 +171,26 @@ impl MalHandler {
                 return Ok(Some(record));
             }
             None => {
-                println!(
+                mal_println(format!(
                     "[sys-chronicle-mal] Could not identify anime title/episode from: \"{}\"",
                     raw_media
-                );
+                ));
                 return Ok(None);
             }
         };
 
-        println!(
+        mal_println(format!(
             "[sys-chronicle-mal] Parsed: \"{}\" Episode {}",
             info.title, info.episode
-        );
+        ));
 
         let mal_outcome = match Self::sync_with_mal(&mut config, raw_media, &info, force).await {
             Ok(res) => res,
             Err(e) => {
-                eprintln!(
+                mal_eprintln(format!(
                     "[sys-chronicle-mal] Network or MAL API error ({}). Saving local watch record.",
                     e
-                );
+                ));
                 None
             }
         };
@@ -304,10 +316,10 @@ impl MalHandler {
 
         let Some(resolved) = super::resolver::resolve_anime(&client, media_path, info).await?
         else {
-            println!(
+            mal_println(format!(
                 "[sys-chronicle-mal] No confident MAL match found for: \"{}\"",
                 info.title
-            );
+            ));
             return Ok(None);
         };
         let anime = resolved.anime;
@@ -319,10 +331,10 @@ impl MalHandler {
             .unwrap_or(0);
 
         let status = if current_watched > info.episode && !force {
-            println!(
+            mal_println(format!(
                 "[sys-chronicle-mal] MAL is already ahead at Episode {} for \"{}\" (watched: {}). Preserving higher progress.",
                 current_watched, anime.title, info.episode
-            );
+            ));
             Self::send_notification(
                 &anime.title,
                 &format!(
@@ -341,15 +353,15 @@ impl MalHandler {
                     .with_context(|| {
                         format!("Failed to update MAL progress for anime ID {}", anime.id)
                     })?;
-                println!(
+                mal_println(format!(
                     "✔ Updated \"{}\" on MyAnimeList to Episode {} (total: {})",
                     anime.title, info.episode, anime.num_episodes
-                );
+                ));
             } else {
-                println!(
+                mal_println(format!(
                     "[sys-chronicle-mal] \"{}\" Episode {} already matches MAL progress.",
                     anime.title, info.episode
-                );
+                ));
             }
             Self::send_notification(
                 &anime.title,

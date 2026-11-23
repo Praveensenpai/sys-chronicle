@@ -45,10 +45,10 @@ pub async fn resolve_anime(
                 }
             }
             Err(e) => {
-                eprintln!(
+                super::handler::mal_eprintln(format!(
                     "[sys-chronicle-mal] MAL search failed for query \"{}\": {}",
                     query, e
-                );
+                ));
             }
         }
     }
@@ -90,10 +90,10 @@ pub async fn resolve_from_override(
             anime.num_episodes = total;
         }
     }
-    println!(
+    super::handler::mal_println(format!(
         "[sys-chronicle-mal] Manual folder override: \"{}\" -> {} ({})",
         entry.folder, anime.title, anime.id
-    );
+    ));
     Ok(Some(ResolvedAnime {
         anime,
         from_override: true,

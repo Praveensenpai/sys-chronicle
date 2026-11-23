@@ -62,8 +62,19 @@ impl AnimeParser {
             }
         }
 
-        // Pattern 2: " - 04" or " - 04v2"
-        if let Ok(re_dash) = Regex::new(r"(.*?)\s+-\s+(\d{1,4})(?:v\d+)?(?:\s|$)") {
+        // Pattern 2: OVA / OAD / Special / SP with episode number (e.g. "Series - OVA 01 - Title" or "Series OVA 01")
+        if let Ok(re_ova) = Regex::new(
+            r"(?i)(.*?)\s+(?:-\s+)?(?:OVA|OAD|Special|SP)\s*[-_]?\s*(\d{1,4})(?:v\d+)?(?:\s+-\s+.*|\s+.*|$)",
+        ) {
+            if let Some(caps) = re_ova.captures(text) {
+                let title = caps.get(1)?.as_str().trim();
+                let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
+                return Self::build_info(title, ep, None);
+            }
+        }
+
+        // Pattern 3: " - 04" or " - 04v2" (with optional following episode title)
+        if let Ok(re_dash) = Regex::new(r"(.*?)\s+-\s+(\d{1,4})(?:v\d+)?(?:\s+-\s+.*|\s+.*|$)") {
             if let Some(caps) = re_dash.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
                 let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
@@ -71,7 +82,7 @@ impl AnimeParser {
             }
         }
 
-        // Pattern 3: "Episode 04" or "Ep 4"
+        // Pattern 4: "Episode 04" or "Ep 4"
         if let Ok(re_ep) = Regex::new(r"(?i)(.*?)\s+(?:episode|ep\.?)\s*(\d{1,4})(?:\s|$)") {
             if let Some(caps) = re_ep.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
@@ -80,12 +91,22 @@ impl AnimeParser {
             }
         }
 
-        // Pattern 4: Trailing number "Title 04"
+        // Pattern 5: Trailing number "Title 04"
         if let Ok(re_num) = Regex::new(r"(.*?)\s+(\d{1,4})(?:v\d+)?$") {
             if let Some(caps) = re_num.captures(text) {
                 let title = caps.get(1)?.as_str().trim();
                 let ep = caps.get(2)?.as_str().parse::<u32>().ok()?;
                 return Self::build_info(title, ep, None);
+            }
+        }
+
+        // Pattern 6: Single OVA / Movie / Film without episode number (implicitly Ep 1)
+        if let Ok(re_single) =
+            Regex::new(r"(?i)(.*?)\s+(?:-\s+)?(?:OVA|OAD|Movie|Film)(?:\s+-\s+.*|\s+.*|$)")
+        {
+            if let Some(caps) = re_single.captures(text) {
+                let title = caps.get(1)?.as_str().trim();
+                return Self::build_info(title, 1, None);
             }
         }
 
@@ -171,5 +192,29 @@ mod tests {
         assert_eq!(info.title, "Jujutsu Kaisen 2nd Season");
         assert_eq!(info.episode, 5);
         assert_eq!(info.season, Some(2));
+    }
+
+    #[test]
+    fn test_ova_with_subtitle() {
+        let raw = "Non Non Biyori - OVA 01 - Okinawa e Ikukoto ni Natta.mkv";
+        let info = AnimeParser::parse(raw).expect("parsed");
+        assert_eq!(info.title, "Non Non Biyori");
+        assert_eq!(info.episode, 1);
+    }
+
+    #[test]
+    fn test_ova_second_episode() {
+        let raw = "Non Non Biyori - OVA 02 - Hotaru ga Tanoshinda.mkv";
+        let info = AnimeParser::parse(raw).expect("parsed");
+        assert_eq!(info.title, "Non Non Biyori");
+        assert_eq!(info.episode, 2);
+    }
+
+    #[test]
+    fn test_single_ova() {
+        let raw = "Non Non Biyori - OVA.mkv";
+        let info = AnimeParser::parse(raw).expect("parsed");
+        assert_eq!(info.title, "Non Non Biyori");
+        assert_eq!(info.episode, 1);
     }
 }

@@ -302,3 +302,62 @@ fn test_reconcile_real_user_history_file() {
         index = end + 1;
     }
 }
+
+#[test]
+fn test_distinct_season_folders_do_not_match() {
+    let rec1 = sample_with_path(
+        "/media/Anime/Non Non Biyori/Season 01/Non Non Biyori - S01E01.mkv",
+        "Non Non Biyori",
+        1,
+    );
+    let is_match = matches_record(
+        &rec1,
+        "/media/Anime/Non Non Biyori/Season 02/Non Non Biyori - S02E01.mkv",
+        "Non Non Biyori",
+        1,
+    );
+    assert!(!is_match, "Episodes in different seasons must not match!");
+}
+
+#[test]
+fn test_ova_metadata_does_not_leak_to_numbered_season_episodes() {
+    let mut ova = sample_with_path(
+        "/media/Anime/Non Non Biyori/OVA/Non Non Biyori - OVA 01.mkv",
+        "Non Non Biyori",
+        1,
+    );
+    ova.mal_anime_id = Some(21667);
+    ova.mal_title = Some("Non Non Biyori: Okinawa e Ikukoto ni Natta".into());
+    ova.mal_total_episodes = Some(1);
+
+    let ep1 = sample_with_path(
+        "/media/Anime/Non Non Biyori/Season 02/Non Non Biyori - S02E01.mkv",
+        "Non Non Biyori",
+        1,
+    );
+
+    let reconciled = AnimeSyncHistory::deduplicate(vec![ova, ep1]);
+    let s2_rec = reconciled
+        .iter()
+        .find(|r| r.raw_title.contains("Season 02"))
+        .expect("season 2 record found");
+
+    assert_ne!(
+        s2_rec.mal_anime_id,
+        Some(21667),
+        "Season 2 episode must not inherit OVA MAL ID!"
+    );
+    assert_ne!(
+        s2_rec.mal_title.as_deref(),
+        Some("Non Non Biyori: Okinawa e Ikukoto ni Natta"),
+        "Season 2 episode must not inherit OVA title!"
+    );
+}
+
+fn sample_with_path(path: &str, title: &str, ep: u32) -> AnimeSyncRecord {
+    let mut r = sample(ep, 100, 1400);
+    r.raw_title = path.into();
+    r.path = Some(path.into());
+    r.canonical_title = title.into();
+    r
+}

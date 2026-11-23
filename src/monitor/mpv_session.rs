@@ -228,14 +228,38 @@ impl MpvPlaybackSession {
 }
 
 fn resolve_media_info(raw: &str, fallback_title: &str) -> (String, u32) {
+    if let Ok(overrides) = crate::mal::overrides::AnimeOverrides::load() {
+        if let Some(ov) = overrides.lookup(raw) {
+            let ep = AnimeParser::parse(raw)
+                .map(|i| i.episode)
+                .unwrap_or_else(|| crate::mal::classifier::AnimeClassifier::extract_fallback_episode(raw));
+            return (ov.canonical_title.clone(), ep);
+        }
+    }
+
     if let Some(crate::mal::classifier::MediaClassification::NonSyncable { title, .. }) =
         crate::mal::classifier::AnimeClassifier::check_local_heuristics(raw)
     {
-        (title, 0)
-    } else if let Some(info) = AnimeParser::parse(raw) {
-        (info.title, info.episode)
+        return (title, 0);
+    }
+
+    if let Some(info) = AnimeParser::parse(raw) {
+        let title = season_adjusted_title(&info.title, info.season);
+        return (title, info.episode);
+    }
+
+    (fallback_title.to_string(), 0)
+}
+
+fn season_adjusted_title(title: &str, season: Option<u32>) -> String {
+    let Some(s) = season.filter(|&s| s > 1) else {
+        return title.to_string();
+    };
+    let lower = title.to_lowercase();
+    if lower.contains("season") || lower.contains(&format!("s{}", s)) {
+        title.to_string()
     } else {
-        (fallback_title.to_string(), 0)
+        format!("{} Season {}", title, s)
     }
 }
 

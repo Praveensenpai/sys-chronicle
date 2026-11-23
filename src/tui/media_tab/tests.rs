@@ -187,6 +187,7 @@ fn state_with(records: Vec<AnimeSyncRecord>, mode: GroupMode) -> MediaTabState {
         list_state,
         group_mode: mode,
         cover_cache: super::super::media_cover::CoverCache::new(),
+        sync_rx: None,
     }
 }
 
@@ -267,4 +268,28 @@ fn render_media_inspector_with_cover_and_titles() {
     assert!(content.contains("Cover"));
     assert!(content.contains("Non Non Biyori Nonstop"));
     assert!(content.contains("Fetching Cover"));
+}
+
+#[test]
+fn test_format_display_path_shortens_gracefully() {
+    use super::super::media_inspector::format_display_path;
+
+    let path = "/home/paisen/Videos/Anime/Non Non Biyori/Season 02/Non Non Biyori - S02E01.mkv";
+
+    // When max_len is very large, returns original path
+    assert_eq!(format_display_path(path, 100), path);
+
+    // When max_len can fit parent + file: ".../Season 02/Non Non Biyori - S02E01.mkv" (43 chars)
+    let shortened = format_display_path(path, 45);
+    assert_eq!(shortened, ".../Season 02/Non Non Biyori - S02E01.mkv");
+
+    // When max_len can only fit file: ".../Non Non Biyori - S02E01.mkv" (31 chars)
+    let file_only = format_display_path(path, 35);
+    assert_eq!(file_only, ".../Non Non Biyori - S02E01.mkv");
+
+    // When max_len is even tighter: middle truncates filename
+    let tight = format_display_path(path, 25);
+    assert!(tight.starts_with(".../"));
+    assert!(tight.ends_with(".mkv"));
+    assert!(tight.len() <= 25);
 }

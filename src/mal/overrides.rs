@@ -170,6 +170,17 @@ fn path_within(child: &str, ancestor: &str) -> bool {
     child.starts_with(&prefix)
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ReassignMetadata {
+    pub mal_anime_id: u64,
+    pub canonical_title: String,
+    pub total_episodes: Option<u32>,
+    pub mal_title: Option<String>,
+    pub mal_title_en: Option<String>,
+    pub mal_title_ja: Option<String>,
+    pub mal_image_url: Option<String>,
+}
+
 /// Rewrite already-recorded history rows for `folder` so the corrected MAL
 /// binding takes effect immediately, without waiting for a re-sync.
 /// Returns the number of records touched.
@@ -178,6 +189,24 @@ pub fn reassign_history(
     mal_anime_id: u64,
     canonical_title: &str,
     total_episodes: Option<u32>,
+) -> Result<usize> {
+    reassign_history_with_meta(
+        folder,
+        &ReassignMetadata {
+            mal_anime_id,
+            canonical_title: canonical_title.to_string(),
+            total_episodes,
+            mal_title: Some(canonical_title.to_string()),
+            mal_title_en: None,
+            mal_title_ja: None,
+            mal_image_url: None,
+        },
+    )
+}
+
+pub fn reassign_history_with_meta(
+    folder: &Path,
+    meta: &ReassignMetadata,
 ) -> Result<usize> {
     let folder = canonical_folder(folder);
     let mut records = AnimeSyncHistory::load_all().unwrap_or_default();
@@ -194,7 +223,7 @@ pub fn reassign_history(
         if !path_within(&parent, &folder) {
             continue;
         }
-        if touches_record(record, mal_anime_id, canonical_title, total_episodes) {
+        if touches_record_with_meta(record, meta) {
             touched += 1;
         }
     }
@@ -205,21 +234,45 @@ pub fn reassign_history(
     Ok(touched)
 }
 
-fn touches_record(
+fn touches_record_with_meta(
     record: &mut AnimeSyncRecord,
-    mal_anime_id: u64,
-    canonical_title: &str,
-    total_episodes: Option<u32>,
+    meta: &ReassignMetadata,
 ) -> bool {
-    let same = record.mal_anime_id == Some(mal_anime_id)
-        && record.canonical_title == canonical_title
-        && record.mal_total_episodes == total_episodes;
+    let inferred_ep = record
+        .path
+        .as_deref()
+        .and_then(super::parser::AnimeParser::parse)
+        .map(|i| i.episode);
+    let new_ep = inferred_ep.unwrap_or_else(|| {
+        if meta.total_episodes == Some(1) && record.episode == 0 {
+            1
+        } else {
+            record.episode
+        }
+    });
+
+    let same = record.mal_anime_id == Some(meta.mal_anime_id)
+        && record.canonical_title == meta.canonical_title
+        && record.mal_total_episodes == meta.total_episodes
+        && record.episode == new_ep
+        && record.mal_title == meta.mal_title;
     if same {
         return false;
     }
-    record.mal_anime_id = Some(mal_anime_id);
-    record.canonical_title = canonical_title.to_string();
-    record.mal_total_episodes = total_episodes;
+    record.mal_anime_id = Some(meta.mal_anime_id);
+    record.canonical_title = meta.canonical_title.clone();
+    record.mal_total_episodes = meta.total_episodes;
+    record.episode = new_ep;
+    record.mal_title = meta.mal_title.clone().or_else(|| Some(meta.canonical_title.clone()));
+    if meta.mal_title_en.is_some() {
+        record.mal_title_en = meta.mal_title_en.clone();
+    }
+    if meta.mal_title_ja.is_some() {
+        record.mal_title_ja = meta.mal_title_ja.clone();
+    }
+    if meta.mal_image_url.is_some() {
+        record.mal_image_url = meta.mal_image_url.clone();
+    }
     true
 }
 
@@ -283,5 +336,48 @@ mod tests {
         e.specials_mal_anime_id = Some(58855);
         assert_eq!(e.id_for("Show - Special 01.mkv"), 58855);
         assert_eq!(e.id_for("Show - S03E01.mkv"), 53410);
+    }
+
+    #[test]
+    fn test_touches_record_with_meta_updates_all_metadata() {
+        let mut rec = AnimeSyncRecord {
+            raw_title: "/media/Anime/Season 02/Show - S02E01.mkv".into(),
+            canonical_title: "Old Title".into(),
+            episode: 1,
+            path: Some("/media/Anime/Season 02/Show - S02E01.mkv".into()),
+            duration_secs: 1400,
+            watched_secs: 100,
+            position_secs: Some(100),
+            watch_pct: 7.1,
+            mal_anime_id: Some(11111),
+            mal_current_ep: None,
+            mal_total_episodes: Some(1),
+            mal_title: Some("Old OVA Title".into()),
+            mal_title_en: None,
+            mal_title_ja: Some("古いタイトル".into()),
+            mal_image_url: Some("http://example.com/old.jpg".into()),
+            status: crate::mal::SyncStatus::Watching,
+            last_updated: "2026-11-24 00:00:00".into(),
+            intervals: Vec::new(),
+        };
+
+        let meta = ReassignMetadata {
+            mal_anime_id: 23623,
+            canonical_title: "Non Non Biyori Repeat".into(),
+            total_episodes: Some(12),
+            mal_title: Some("Non Non Biyori Repeat".into()),
+            mal_title_en: Some("Non Non Biyori Repeat".into()),
+            mal_title_ja: Some("のんのんびより りぴーと".into()),
+            mal_image_url: Some("http://example.com/s2.jpg".into()),
+        };
+
+        let touched = touches_record_with_meta(&mut rec, &meta);
+        assert!(touched);
+        assert_eq!(rec.mal_anime_id, Some(23623));
+        assert_eq!(rec.canonical_title, "Non Non Biyori Repeat");
+        assert_eq!(rec.mal_title.as_deref(), Some("Non Non Biyori Repeat"));
+        assert_eq!(rec.mal_title_ja.as_deref(), Some("のんのんびより りぴーと"));
+        assert_eq!(rec.mal_image_url.as_deref(), Some("http://example.com/s2.jpg"));
+        assert_eq!(rec.mal_total_episodes, Some(12));
     }
 }
