@@ -258,9 +258,18 @@ fn merge_record_fields(existing: &mut AnimeSyncRecord, rec: &AnimeSyncRecord) {
     existing.mal_current_ep = existing.mal_current_ep.or(rec.mal_current_ep);
     existing.mal_total_episodes = existing.mal_total_episodes.or(rec.mal_total_episodes);
     existing.mal_title = existing.mal_title.take().or_else(|| rec.mal_title.clone());
-    existing.mal_title_en = existing.mal_title_en.take().or_else(|| rec.mal_title_en.clone());
-    existing.mal_title_ja = existing.mal_title_ja.take().or_else(|| rec.mal_title_ja.clone());
-    existing.mal_image_url = existing.mal_image_url.take().or_else(|| rec.mal_image_url.clone());
+    existing.mal_title_en = existing
+        .mal_title_en
+        .take()
+        .or_else(|| rec.mal_title_en.clone());
+    existing.mal_title_ja = existing
+        .mal_title_ja
+        .take()
+        .or_else(|| rec.mal_title_ja.clone());
+    existing.mal_image_url = existing
+        .mal_image_url
+        .take()
+        .or_else(|| rec.mal_image_url.clone());
 
     if !rec.intervals.is_empty() {
         existing.intervals =
@@ -275,8 +284,7 @@ fn merge_record_fields(existing: &mut AnimeSyncRecord, rec: &AnimeSyncRecord) {
 }
 
 fn reconcile_records_metadata(records: &mut [AnimeSyncRecord]) {
-    let mut by_id: std::collections::HashMap<u64, AnimeMeta> =
-        std::collections::HashMap::new();
+    let mut by_id: std::collections::HashMap<u64, AnimeMeta> = std::collections::HashMap::new();
     let mut by_title: std::collections::HashMap<String, AnimeMeta> =
         std::collections::HashMap::new();
 
@@ -321,8 +329,7 @@ fn reconcile_records_metadata(records: &mut [AnimeSyncRecord]) {
                     t_entry.mal_image_url = entry.mal_image_url.clone();
                 }
                 if let Some(max_ep) = entry.max_synced_ep {
-                    t_entry.max_synced_ep =
-                        Some(t_entry.max_synced_ep.unwrap_or(0).max(max_ep));
+                    t_entry.max_synced_ep = Some(t_entry.max_synced_ep.unwrap_or(0).max(max_ep));
                 }
             }
         }

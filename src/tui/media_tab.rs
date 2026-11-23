@@ -177,7 +177,10 @@ impl MediaTabState {
                         } else {
                             "OVA/Special".to_string()
                         };
-                        Ok(format!("✔ Synced \"{}\" {ep_label} to MyAnimeList", r.canonical_title))
+                        Ok(format!(
+                            "✔ Synced \"{}\" {ep_label} to MyAnimeList",
+                            r.canonical_title
+                        ))
                     }
                     Ok(None) => Err("Could not identify anime title/episode to sync".to_string()),
                     Err(e) => Err(format!("Sync error: {e}")),

@@ -232,7 +232,9 @@ fn resolve_media_info(raw: &str, fallback_title: &str) -> (String, u32) {
         if let Some(ov) = overrides.lookup(raw) {
             let ep = AnimeParser::parse(raw)
                 .map(|i| i.episode)
-                .unwrap_or_else(|| crate::mal::classifier::AnimeClassifier::extract_fallback_episode(raw));
+                .unwrap_or_else(|| {
+                    crate::mal::classifier::AnimeClassifier::extract_fallback_episode(raw)
+                });
             return (ov.canonical_title.clone(), ep);
         }
     }

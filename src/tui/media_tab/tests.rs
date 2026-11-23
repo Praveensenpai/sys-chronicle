@@ -271,25 +271,36 @@ fn render_media_inspector_with_cover_and_titles() {
 }
 
 #[test]
-fn test_format_display_path_shortens_gracefully() {
-    use super::super::media_inspector::format_display_path;
+fn test_format_display_folder_and_filename() {
+    use super::super::media_inspector::{format_display_filename, format_display_folder};
 
     let path = "/home/paisen/Videos/Anime/Non Non Biyori/Season 02/Non Non Biyori - S02E01.mkv";
 
-    // When max_len is very large, returns original path
-    assert_eq!(format_display_path(path, 100), path);
+    // Folder formatting across widths
+    let folder_full = format_display_folder(path, 60);
+    assert_eq!(
+        folder_full,
+        Some("/home/paisen/Videos/Anime/Non Non Biyori/Season 02".to_string())
+    );
 
-    // When max_len can fit parent + file: ".../Season 02/Non Non Biyori - S02E01.mkv" (43 chars)
-    let shortened = format_display_path(path, 45);
-    assert_eq!(shortened, ".../Season 02/Non Non Biyori - S02E01.mkv");
+    let folder_short = format_display_folder(path, 30);
+    assert_eq!(
+        folder_short,
+        Some(".../Non Non Biyori/Season 02".to_string())
+    );
 
-    // When max_len can only fit file: ".../Non Non Biyori - S02E01.mkv" (31 chars)
-    let file_only = format_display_path(path, 35);
-    assert_eq!(file_only, ".../Non Non Biyori - S02E01.mkv");
+    let folder_tight = format_display_folder(path, 15);
+    assert_eq!(folder_tight, Some(".../Season 02".to_string()));
 
-    // When max_len is even tighter: middle truncates filename
-    let tight = format_display_path(path, 25);
-    assert!(tight.starts_with(".../"));
-    assert!(tight.ends_with(".mkv"));
-    assert!(tight.len() <= 25);
+    // Filename formatting preserves full name without middle dots
+    let filename = format_display_filename(path, 35);
+    assert_eq!(filename, "Non Non Biyori - S02E01.mkv");
+    assert!(!filename.contains("..."));
+    assert!(!filename.contains(".."));
+
+    // Long filename truncation uses ellipsis at the end, not middle
+    let truncated = format_display_filename(path, 20);
+    assert_eq!(truncated.chars().count(), 20);
+    assert!(truncated.ends_with('…'));
+    assert!(!truncated.contains("..."));
 }

@@ -204,10 +204,7 @@ pub fn reassign_history(
     )
 }
 
-pub fn reassign_history_with_meta(
-    folder: &Path,
-    meta: &ReassignMetadata,
-) -> Result<usize> {
+pub fn reassign_history_with_meta(folder: &Path, meta: &ReassignMetadata) -> Result<usize> {
     let folder = canonical_folder(folder);
     let mut records = AnimeSyncHistory::load_all().unwrap_or_default();
     let mut touched = 0;
@@ -234,10 +231,7 @@ pub fn reassign_history_with_meta(
     Ok(touched)
 }
 
-fn touches_record_with_meta(
-    record: &mut AnimeSyncRecord,
-    meta: &ReassignMetadata,
-) -> bool {
+fn touches_record_with_meta(record: &mut AnimeSyncRecord, meta: &ReassignMetadata) -> bool {
     let inferred_ep = record
         .path
         .as_deref()
@@ -263,7 +257,10 @@ fn touches_record_with_meta(
     record.canonical_title = meta.canonical_title.clone();
     record.mal_total_episodes = meta.total_episodes;
     record.episode = new_ep;
-    record.mal_title = meta.mal_title.clone().or_else(|| Some(meta.canonical_title.clone()));
+    record.mal_title = meta
+        .mal_title
+        .clone()
+        .or_else(|| Some(meta.canonical_title.clone()));
     if meta.mal_title_en.is_some() {
         record.mal_title_en = meta.mal_title_en.clone();
     }
@@ -377,7 +374,10 @@ mod tests {
         assert_eq!(rec.canonical_title, "Non Non Biyori Repeat");
         assert_eq!(rec.mal_title.as_deref(), Some("Non Non Biyori Repeat"));
         assert_eq!(rec.mal_title_ja.as_deref(), Some("のんのんびより りぴーと"));
-        assert_eq!(rec.mal_image_url.as_deref(), Some("http://example.com/s2.jpg"));
+        assert_eq!(
+            rec.mal_image_url.as_deref(),
+            Some("http://example.com/s2.jpg")
+        );
         assert_eq!(rec.mal_total_episodes, Some(12));
     }
 }

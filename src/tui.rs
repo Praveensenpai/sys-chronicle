@@ -25,8 +25,8 @@ use crate::monitor::metrics::AppDetail;
 use crate::monitor::{MetricsMonitor, PowerMonitor, WindowMonitor};
 
 pub mod media_cover;
-pub mod media_kitty;
 mod media_inspector;
+pub mod media_kitty;
 mod media_modal;
 mod media_picker;
 mod media_tab;

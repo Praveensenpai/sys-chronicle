@@ -222,14 +222,21 @@ impl MediaPickerState {
             canonical_title: anime.title.clone(),
             total_episodes: total,
             mal_title: Some(anime.title.clone()),
-            mal_title_en: anime.alternative_titles.as_ref().and_then(|a| a.english.clone()),
-            mal_title_ja: anime.alternative_titles.as_ref().and_then(|a| a.japanese.clone()),
+            mal_title_en: anime
+                .alternative_titles
+                .as_ref()
+                .and_then(|a| a.english.clone()),
+            mal_title_ja: anime
+                .alternative_titles
+                .as_ref()
+                .and_then(|a| a.japanese.clone()),
             mal_image_url: anime
                 .main_picture
                 .as_ref()
                 .and_then(|p| p.best_url().map(String::from)),
         };
-        let touched = crate::mal::overrides::reassign_history_with_meta(&folder, &meta).unwrap_or(0);
+        let touched =
+            crate::mal::overrides::reassign_history_with_meta(&folder, &meta).unwrap_or(0);
         self.close();
         Some(format!(
             "Bound {} -> {} ({}); updated {} record(s)",

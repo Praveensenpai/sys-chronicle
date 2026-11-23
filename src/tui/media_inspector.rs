@@ -5,36 +5,15 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Wrap},
     Frame,
 };
-use regex::Regex;
+mod format;
+pub use format::{
+    clean_display_title, format_display_filename, format_display_folder, format_time,
+    truncate_footer_message,
+};
 
 use super::media_tab::MediaTabState;
 use crate::mal::history::AnimeSyncRecord;
 use crate::mal::SyncStatus;
-
-fn format_time(secs: u64) -> String {
-    let hours = secs / 3600;
-    let mins = (secs % 3600) / 60;
-    let s = secs % 60;
-    if hours > 0 {
-        format!("{:02}:{:02}:{:02}", hours, mins, s)
-    } else {
-        format!("{:02}:{:02}", mins, s)
-    }
-}
-
-pub(crate) fn clean_display_title(s: &str) -> String {
-    let mut text = s.to_string();
-    for ext in [".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v"] {
-        if text.to_ascii_lowercase().ends_with(ext) {
-            text.truncate(text.len() - ext.len());
-            break;
-        }
-    }
-    if let Ok(re) = Regex::new(r"\[[^\]]*\]") {
-        text = re.replace_all(&text, " ").to_string();
-    }
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
 
 fn build_title_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
     let raw = r.mal_title.as_deref().unwrap_or(&r.canonical_title);
@@ -70,40 +49,6 @@ fn build_title_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
     lines
 }
 
-pub fn format_display_path(path: &str, max_len: usize) -> String {
-    if path.chars().count() <= max_len {
-        return path.to_string();
-    }
-    let p = std::path::Path::new(path);
-    let file_name = p.file_name().and_then(|f| f.to_str()).unwrap_or(path);
-    let parent_name = p.parent().and_then(|p| p.file_name()).and_then(|f| f.to_str());
-
-    if let Some(parent) = parent_name {
-        let candidate = format!(".../{}/{}", parent, file_name);
-        if candidate.chars().count() <= max_len {
-            return candidate;
-        }
-    }
-
-    let file_cand = format!(".../{}", file_name);
-    if file_cand.chars().count() <= max_len {
-        return file_cand;
-    }
-
-    let char_count = file_name.chars().count();
-    if max_len <= 8 || char_count <= 8 {
-        let take_n = max_len.saturating_sub(3).max(1);
-        let end: String = file_name.chars().skip(char_count.saturating_sub(take_n)).collect();
-        return format!("...{}", end);
-    }
-
-    let avail = max_len.saturating_sub(6);
-    let half = avail / 2;
-    let start: String = file_name.chars().take(half).collect();
-    let end: String = file_name.chars().skip(char_count.saturating_sub(avail - half)).collect();
-    format!(".../{}..{}", start, end)
-}
-
 fn build_stats_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
     let pos_str = format!(
         "{} / {}",
@@ -117,13 +62,15 @@ fn build_stats_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
         r.watch_pct
     );
     let raw_path = r.path.as_deref().unwrap_or(&r.raw_title);
-    let file_str = format_display_path(raw_path, max_w.saturating_sub(10).max(12));
+    let content_w = max_w.saturating_sub(10).max(12);
+    let folder_opt = format_display_folder(raw_path, content_w);
+    let file_str = format_display_filename(raw_path, content_w);
     let id_label = r
         .mal_anime_id
         .map(|id| format!("#{}", id))
         .unwrap_or_else(|| "Local".into());
 
-    vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled("Seek:    ", Style::default().fg(Color::DarkGray)),
             Span::styled(pos_str, Style::default().fg(Color::Yellow)),
@@ -132,16 +79,30 @@ fn build_stats_lines(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
             Span::styled("Watched: ", Style::default().fg(Color::DarkGray)),
             Span::styled(watch_str, Style::default().fg(Color::Green)),
         ]),
-        Line::from(vec![
-            Span::styled("File:    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(file_str, Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(vec![
-            Span::styled("MAL ID:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(id_label, Style::default().fg(Color::Cyan)),
-            Span::styled(format!("  {}", r.last_updated), Style::default().fg(Color::DarkGray)),
-        ]),
-    ]
+    ];
+
+    if let Some(folder_str) = folder_opt {
+        lines.push(Line::from(vec![
+            Span::styled("Folder:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(folder_str, Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("File:    ", Style::default().fg(Color::DarkGray)),
+        Span::styled(file_str, Style::default().fg(Color::Gray)),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("MAL ID:  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(id_label, Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("  {}", r.last_updated),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    lines
 }
 
 fn build_media_details(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> {
@@ -171,7 +132,9 @@ fn build_media_details(r: &AnimeSyncRecord, max_w: usize) -> Vec<Line<'static>> 
         ),
         Span::styled(
             format!("[{}]", badge_text),
-            Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
         ),
     ]));
 
@@ -237,7 +200,12 @@ fn render_gauges(f: &mut Frame, r: &AnimeSyncRecord, pos_area: Rect, watched_are
     f.render_widget(watched_gauge, watched_area);
 }
 
-fn exp_lines(title: &'static str, color: Color, detail: String, note: &'static str) -> Vec<Line<'static>> {
+fn exp_lines(
+    title: &'static str,
+    color: Color,
+    detail: String,
+    note: &'static str,
+) -> Vec<Line<'static>> {
     vec![
         Line::from(Span::styled(
             title,
@@ -254,13 +222,19 @@ fn build_sync_explanation(r: &AnimeSyncRecord) -> Vec<Line<'static>> {
         SyncStatus::AheadOnMal { mal_episode } => exp_lines(
             "⏩ MAL Progress is Ahead!",
             Color::Cyan,
-            format!("• You watched Ep {}, but MAL has Ep {}.", r.episode, mal_episode),
+            format!(
+                "• You watched Ep {}, but MAL has Ep {}.",
+                r.episode, mal_episode
+            ),
             "• Protected from downgrade. Press 'f' to force overwrite.",
         ),
         SyncStatus::Synced => exp_lines(
             "✔ Synced with MyAnimeList",
             Color::Green,
-            format!("Episode {} recorded on your MyAnimeList account.", r.episode),
+            format!(
+                "Episode {} recorded on your MyAnimeList account.",
+                r.episode
+            ),
             "• Your progress is fully synchronized.",
         ),
         SyncStatus::ThresholdMet => exp_lines(
@@ -282,12 +256,18 @@ fn build_sync_explanation(r: &AnimeSyncRecord) -> Vec<Line<'static>> {
             )),
             Line::from(""),
             Line::from(Span::styled(error.clone(), Style::default().fg(Color::Red))),
-            Line::from(Span::styled("Press 's' to retry manual sync.", Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled(
+                "Press 's' to retry manual sync.",
+                Style::default().fg(Color::Yellow),
+            )),
         ],
         SyncStatus::NonSyncable { reason } => exp_lines(
             "⭐ Non-Syncable Media (Not an Anime Episode)",
             Color::Magenta,
-            format!("Category: {}. Bonus feature, special, or non-anime.", reason),
+            format!(
+                "Category: {}. Bonus feature, special, or non-anime.",
+                reason
+            ),
             "• SysChronicle tracks locally, but skips MAL sync.",
         ),
     }
@@ -366,19 +346,6 @@ fn render_status_footer(f: &mut Frame, area: Rect, state: &MediaTabState) {
     f.render_widget(Paragraph::new(status_text), area);
 }
 
-fn truncate_footer_message(msg: &str, max_width: usize) -> String {
-    let limit = max_width.saturating_sub(1);
-    if limit == 0 {
-        return String::new();
-    }
-    if msg.chars().count() > limit {
-        let truncated: String = msg.chars().take(limit.saturating_sub(1)).collect();
-        format!("{truncated}…")
-    } else {
-        msg.to_string()
-    }
-}
-
 pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &mut MediaTabState) {
     let block = Block::default()
         .title(" 🔍 Anime & MAL Inspector ")
@@ -395,7 +362,7 @@ pub fn render_anime_inspector(f: &mut Frame, area: Rect, state: &mut MediaTabSta
     let top_len = if show_cover {
         13.min(area.height.saturating_sub(11)).max(9)
     } else {
-        7
+        8
     };
 
     let inner = Layout::default()

@@ -107,9 +107,8 @@ fn install_binary(src_file: &Path, dst_file: &Path) -> Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = fs::Permissions::from_mode(0o755);
-        fs::set_permissions(dst_file, perms).with_context(|| {
-            format!("Failed to set permissions on {}", dst_file.display())
-        })?;
+        fs::set_permissions(dst_file, perms)
+            .with_context(|| format!("Failed to set permissions on {}", dst_file.display()))?;
     }
 
     Ok(())
@@ -154,7 +153,12 @@ async fn download_and_extract(url: &str, temp_dir: &Path) -> Result<()> {
     fs::write(&tar_gz_path, bytes).context("Failed to write downloaded archive to disk")?;
 
     let status = Command::new("tar")
-        .args(["-xzf", tar_gz_path.to_str().unwrap_or_default(), "-C", temp_dir.to_str().unwrap_or_default()])
+        .args([
+            "-xzf",
+            tar_gz_path.to_str().unwrap_or_default(),
+            "-C",
+            temp_dir.to_str().unwrap_or_default(),
+        ])
         .status()
         .context("Failed to execute tar command to extract archive")?;
 
@@ -170,21 +174,34 @@ pub async fn run_update(check_only: bool, force: bool) -> Result<()> {
     let current_ver = SemVer::parse(current_raw)
         .context("Failed to parse current CARGO_PKG_VERSION as SemVer")?;
 
-    println!("[+] Checking for updates from GitHub (current: v{})...", current_raw);
+    println!(
+        "[+] Checking for updates from GitHub (current: v{})...",
+        current_raw
+    );
     let release = fetch_latest_release(REPO).await?;
-    let remote_ver = SemVer::parse(&release.tag_name).context("Failed to parse remote release tag_name")?;
+    let remote_ver =
+        SemVer::parse(&release.tag_name).context("Failed to parse remote release tag_name")?;
 
     let is_upgrade = remote_ver.is_newer_than(&current_ver);
     if !is_upgrade && !force {
-        println!("✔ sys-chronicle is already up to date ({}).", release.tag_name);
+        println!(
+            "✔ sys-chronicle is already up to date ({}).",
+            release.tag_name
+        );
         return Ok(());
     }
 
     if check_only {
         if is_upgrade {
-            println!("💡 A new version is available: v{} -> {} (run `sys-chronicle update` to upgrade)", current_raw, release.tag_name);
+            println!(
+                "💡 A new version is available: v{} -> {} (run `sys-chronicle update` to upgrade)",
+                current_raw, release.tag_name
+            );
         } else {
-            println!("✔ Current version v{} matches latest release {}.", current_raw, release.tag_name);
+            println!(
+                "✔ Current version v{} matches latest release {}.",
+                current_raw, release.tag_name
+            );
         }
         return Ok(());
     }
@@ -193,12 +210,24 @@ pub async fn run_update(check_only: bool, force: bool) -> Result<()> {
         .assets
         .iter()
         .find(|a| a.name == TARBALL_ASSET)
-        .with_context(|| format!("Release {} missing required asset {}", release.tag_name, TARBALL_ASSET))?;
+        .with_context(|| {
+            format!(
+                "Release {} missing required asset {}",
+                release.tag_name, TARBALL_ASSET
+            )
+        })?;
 
-    let temp_dir = std::env::temp_dir().join(format!("sys-chronicle-update-{}", std::process::id()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("sys-chronicle-update-{}", std::process::id()));
     fs::create_dir_all(&temp_dir)?;
 
-    let result = perform_upgrade(&asset.browser_download_url, &temp_dir, &release.tag_name, current_raw).await;
+    let result = perform_upgrade(
+        &asset.browser_download_url,
+        &temp_dir,
+        &release.tag_name,
+        current_raw,
+    )
+    .await;
     let _ = fs::remove_dir_all(&temp_dir);
     result
 }
@@ -213,7 +242,10 @@ async fn perform_upgrade(
     download_and_extract(download_url, temp_dir).await?;
 
     let install_dir = determine_install_dir()?;
-    println!("[+] Installing updated binaries to {}...", install_dir.display());
+    println!(
+        "[+] Installing updated binaries to {}...",
+        install_dir.display()
+    );
 
     let sys_bin = temp_dir.join("sys-chronicle");
     if sys_bin.exists() {
@@ -228,7 +260,10 @@ async fn perform_upgrade(
     }
 
     reload_service_and_plugin(&install_dir);
-    println!("🎉 Successfully updated sys-chronicle from v{} to {}!", current_raw, new_tag);
+    println!(
+        "🎉 Successfully updated sys-chronicle from v{} to {}!",
+        current_raw, new_tag
+    );
 
     Ok(())
 }
@@ -240,10 +275,24 @@ mod tests {
     #[test]
     fn test_semver_parse_clean_and_tags() {
         let v1 = SemVer::parse("v0.7.0").expect("parse v0.7.0");
-        assert_eq!(v1, SemVer { major: 0, minor: 7, patch: 0 });
+        assert_eq!(
+            v1,
+            SemVer {
+                major: 0,
+                minor: 7,
+                patch: 0
+            }
+        );
 
         let v2 = SemVer::parse("0.8.1-beta").expect("parse with pre-release");
-        assert_eq!(v2, SemVer { major: 0, minor: 8, patch: 1 });
+        assert_eq!(
+            v2,
+            SemVer {
+                major: 0,
+                minor: 8,
+                patch: 1
+            }
+        );
 
         assert!(SemVer::parse("invalid").is_none());
     }
